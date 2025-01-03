@@ -7,6 +7,9 @@ edition = "2021"
 libc = "0.2"
 cpal = "0.15.3"
 
+[profile.dev]
+debug = 0
+
 [profile.release]
 strip = true
 lto = true

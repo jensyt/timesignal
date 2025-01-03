@@ -14,11 +14,21 @@ env:
 
 jobs:
   build:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v4
-    - run: rustup toolchain install stable --profile minimal --no-self-update
-    - uses: Swatinem/rust-cache@v2
+    - name: Install Rust toolchain
+      run: rustup toolchain install stable --profile minimal --no-self-update
+    - name: Get cache
+      uses: Swatinem/rust-cache@v2
+    - name: Install ALSA on Linux
+      if: matrix.os == 'ubuntu-latest'
+      run: sudo apt-get install -y libasound2-dev
     - name: Build
       run: cargo test -p timesignal --no-run
     - name: Run tests

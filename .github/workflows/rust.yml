@@ -1,0 +1,22 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: rustup toolchain install stable --profile minimal --no-self-update
+    - uses: Swatinem/rust-cache@v2
+    - name: Build
+      run: cargo test -p timesignal --no-run
+    - name: Run tests
+      run: cargo test -p timesignal --no-fail-fast

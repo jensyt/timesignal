@@ -442,13 +442,14 @@ fn main() -> ExitCode {
 		Err(e) => {
 			return if let ArgumentsError::Help = e {
 				println!("\
-timesignal [options] signal
 Generate time signals for setting radio-controlled clocks with no extra hardware.
 
+Usage: timesignal [OPTIONS] <SIGNAL>
+
 Options:
-  -n, -c, --count  the number of messages to output, default 4
-  -t, --timezone   the timezone to use, default depends on signal
-  --ntp            the NTP server to use for time, default none
+  -n, -c, --count <COUNT>   the number of messages to output, default 4
+  -t, --timezone <TIMEZONE> the timezone to use, default depends on signal
+  --ntp <SERVER>            the NTP server to use for time, default none
 
 Supported signals:
   wwvb
@@ -458,8 +459,7 @@ Supported signals:
 Examples:
   timesignal -n 6 wwvb
   timesignal -t \"EST5EDT,M3.2.0,M11.1.0\" junghans
-  timesignal -n 8 --ntp time.google.com dcf77\n\
-				");
+  timesignal -n 8 --ntp time.google.com dcf77\n");
 				ExitCode::SUCCESS
 			} else {
 				eprintln!("{}", e);

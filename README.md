@@ -38,30 +38,30 @@ timesignal [options] signal
 ```
 
 The possible signal types are:
-- *junghans*: Proprietary Junghans signal
-- *wwvb*: US's [WWVB]
-- *dcf77*: Germany's [DCF77]
-- *jjy40*: Japan's [JJY40] (not yet implemented)
-- *jjy60*: Japan's [JJY60] (not yet implemented)
-- *msf*: UK's [MSF] (not yet implemented)
+- `junghans`: Proprietary Junghans signal
+- `wwvb`: US's [WWVB]
+- `dcf77`: Germany's [DCF77]
+- `jjy40`: Japan's [JJY40] (not yet implemented)
+- `jjy60`: Japan's [JJY60] (not yet implemented)
+- `msf`: UK's [MSF] (not yet implemented)
 
 The supported options are:
 
-| Short Form | Long Form  | Value                 | Default          | Description                      |
-| ---------- | ---------- | --------------------- | ---------------- | -------------------------------- |
-| -n, -c     | --count    | Positive Integer      | 4                | The number of messages to send.  |
-| -t         | --timezone | Filename or TZ string | Signal-dependent | The timezone to use. More below. |
-|            | --ntp      | Hostname or IP        | None             | Use NTP to determine the time.   |
+| Short Form | Long Form   | Value                 | Default          | Description                      |
+| ---------- | ----------- | --------------------- | ---------------- | -------------------------------- |
+| `-n`, `-c` | `--count`   | Positive Integer      | 4                | The number of messages to send.  |
+| `-t`       | `--timezone`| Filename or TZ string | Signal-dependent | The timezone to use. More below. |
+|            | `--ntp`     | Hostname or IP        | None             | Use NTP to determine the time.   |
 
 For public time signals, the message rate is one message per minute. For Junghans, the message rate
 is four messages per minute.
 
 Each signal uses timezone information slightly differently, as described here:
-- *Junghans*: the timezone represents the device's local time, defaulting to /etc/localtime
-- *WWVB*: the timezone represents US standard DST rules, defaulting to
-        /usr/share/zoneinfo/America/New_York
-- *DCF77*: the timezone represents the time in Berlin, Germany, defaulting to
-         /usr/share/zoneinfo/Europe/Berlin
+- **Junghans**: the timezone represents the device's local time, defaulting to /etc/localtime
+- **WWVB**: the timezone represents US standard DST rules, defaulting to
+            /usr/share/zoneinfo/America/New_York
+- **DCF77**: the timezone represents the time in Berlin, Germany, defaulting to
+             /usr/share/zoneinfo/Europe/Berlin
 
 Timezone files must be in [TZif format], which is common to Unix-like systems. Alternatively, a
 [TZ string] can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is

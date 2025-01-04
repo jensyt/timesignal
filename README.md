@@ -7,7 +7,7 @@ works by taking advantage of stray RF signals created by audio hardware as a sid
 operation -- the audio output itself is not useful as devices listening for these time signals use
 RF rather than audio.
 
-Why use this instead of the many other time signal generators available? Two possible reasons:
+Why use this instead of the many other time signal generators available? Three possible reasons:
 
 1. This program does not require special hardware. Most other projects are designed for a Raspberry
    Pi or similar device, using its clock output and extra components to generate the RF signal.
@@ -15,6 +15,8 @@ Why use this instead of the many other time signal generators available? Two pos
 2. One of the limitations of how most projects use the Raspberry Pi's clock output is that they
    cannot implement phase modulated signals. This project aims to fully reproduce the public time
    signals, including both amplitude and phase modulation.
+3. This program supports Junghans's proprietary format, which is more featureful if you have a
+   supported clock or watch.
 
 ## Quick Setup Guide
 1. Install a recent version of [Rust].

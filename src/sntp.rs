@@ -22,7 +22,7 @@ use std::{
 	slice::{from_raw_parts, from_raw_parts_mut},
 	time::Duration
 };
-use crate::time::{currenttime, TimeSpec};
+use time::{now, TimeSpec};
 
 /// Offset to adjust a Unix timestamp (epoch Jan 1, 1970) to NTP time stamp (epoch Jan 1, 1900)
 const UNIX_TO_NTP_EPOCH_ADJUST: i64 = (70 * 365 + 17) * 86400; // 17 leap years between 1900-1970
@@ -463,9 +463,9 @@ impl NtpService {
 		};
 
 		socket.connect(addr)?;
-		let unixtime = currenttime().ok_or_else(
-			|| io::Error::new(io::ErrorKind::Other, "Failed to get current time")
-		)?;
+		let Some(unixtime) = now() else {
+			return Err(io::Error::new(io::ErrorKind::Other, "Failed to get current time"));
+		};
 		let mut msg = NtpMessage::new(unixtime.into());
 		socket.send(msg.as_bytes())?;
 		let bytes = socket.recv(msg.as_bytes_mut())?;
@@ -474,9 +474,9 @@ impl NtpService {
 				io::Error::new(io::ErrorKind::Other, "Invalid message returned from NTP server")
 			);
 		}
-		let unixtime = currenttime().ok_or_else(
-			|| io::Error::new(io::ErrorKind::Other, "Failed to get current time")
-		)?;
+		let Some(unixtime) = now() else {
+			return Err(io::Error::new(io::ErrorKind::Other, "Failed to get current time"));
+		};
 		let t1 = NtpTimestamp::from_wire_format(msg.origin_time);
 		let t2 = NtpTimestamp::from_wire_format(msg.rx_time);
 		let t3 = NtpTimestamp::from_wire_format(msg.tx_time);
@@ -601,9 +601,9 @@ pub fn get_ntp_time(addr: &str) -> Result<TimeSpec, io::Error> {
 	}
 	// Unwrap will not panic because we ensured best is not None above
 	let t: TimeSpec = best.unwrap().1.into();
-	let unixtime = currenttime().ok_or_else(
-		|| io::Error::new(io::ErrorKind::Other, "Failed to get current time")
-	)?;
+	let Some(unixtime) = now() else {
+		return Err(io::Error::new(io::ErrorKind::Other, "Failed to get current time"));
+	};
 
 	Ok(unixtime + t)
 }

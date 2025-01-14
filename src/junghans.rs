@@ -116,8 +116,11 @@
 //! in a message is always odd, which guarantees that the remaining padding time needed is evenly
 //! divisible by 200 ms after adding the final 300 ms 1 bit.
 
-use crate::{time::{Nanoseconds, TimeSpec, Tm}, tz::{self, Timezone}, Message};
-use std::{error, fmt};
+use crate::{Message, MessageGenerator};
+pub use crate::error::MessageError as Error;
+#[cfg(debug_assertions)]
+use std::fmt;
+use time::{Nanoseconds, TimeSpec, Tm, tz::{self, Timezone}};
 
 /// Table of valid timezone offsets.
 ///
@@ -279,37 +282,6 @@ const CHECKSUM_TABLE: [u8; 256] = [0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x8
 fn make_checksum_index(lower: u8, upper: u8) -> u8 {
 	(lower & 0xf) | (upper << 4)
 }
-
-/// The error type for constructing Junghans messages.
-#[cfg_attr(test, derive(PartialEq))]
-pub enum Error {
-	/// The input time is before the Unix epoch (Jan 1, 1970) and not supported. The unsupported time
-	/// is provided in the payload.
-	UnsupportedTime(i64),
-	/// The timezone offset is not valid for Junghans configuration. See [`TIMEZONE_OFFSET`] for more
-	/// details on supported timezones. The supplied offset (in seconds) is provided in the payload.
-	UnsupportedTimezoneOffset(i32),
-	/// Error parsing the default timezone. The underlying error is provided in the payload.
-	TimezoneError(tz::Error)
-}
-
-impl fmt::Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Error::UnsupportedTime(x) => write!(f, "Unsupported time: {}", x),
-			Error::UnsupportedTimezoneOffset(x) => write!(f, "Unsupported local timezone offset: {}", x),
-			Error::TimezoneError(x) => write!(f, "Timezone error: {}", x),
-		}
-	}
-}
-
-impl fmt::Debug for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		fmt::Display::fmt(self, f)
-	}
-}
-
-impl error::Error for Error {}
 
 /// An unpacked / uncompressed Junghans message.
 ///
@@ -594,7 +566,9 @@ impl Junghans {
 		}
 		Ok(Junghans { local_tz })
 	}
+}
 
+impl MessageGenerator for Junghans {
 	/// Get a message for the given time.
 	///
 	/// Since the Junghans format encodes the time at the **end** of the message, this function
@@ -644,7 +618,7 @@ impl Junghans {
 	/// assert_eq!(time.sec, 1716742720);
 	/// assert_eq!(time.nsec, 0);
 	/// ```
-	pub fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
 		let mut total_time: i64 = 15000000000;
 		let mut sec = time.sec + 15;
 
@@ -837,12 +811,12 @@ mod tests {
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").unwrap()
+		time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").unwrap()
 	}
 
 	#[test]
 	fn timezone_test() {
-		assert_eq!(Junghans::new(crate::tz::parse_tzstring("ABC9:20".as_bytes()).ok()),
+		assert_eq!(Junghans::new(time::tz::parse_tzstring("ABC9:20".as_bytes()).ok()),
 				   Err(Error::UnsupportedTimezoneOffset(-33600)));
 	}
 
@@ -1029,11 +1003,11 @@ mod tests {
 		// Construct a Junghans object to generate messages
 		let j = Junghans::new(
 					// Timezone is used to configure the watch's local time
-					crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+					time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 				).expect("Invalid timezone offset");
 
 		// Get a message for the current time
-		let m = j.get_message(&mut crate::time::currenttime().unwrap());
+		let m = j.get_message(&mut time::now().unwrap());
 		match m {
 			Ok(mut m) => {
 				// Convert real time (nanoseconds) to sample time (48 kHz)
@@ -1080,7 +1054,7 @@ mod tests {
 
 		// Documentation for Junghans::new
 		let j = Junghans::new(
-			crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+			time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 		);
 		match j {
 			Ok(_j) => {
@@ -1089,7 +1063,7 @@ mod tests {
 			Err(_) => {
 				// Known valid offset (UTC-8 / UTC-7) that cannot fail
 				let _j = Junghans::new(
-					crate::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+					time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
 				).unwrap();
 				// Create & use messages
 			}
@@ -1098,11 +1072,11 @@ mod tests {
 		// Documentation for make_writer
 		// Construct a Junghans object to generate messages
 		let j = Junghans::new(
-					crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+					time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 				).expect("Invalid timezone offset");
 
 		// Get a message for the current time
-		let mut m = j.get_message(&mut crate::time::currenttime().unwrap()).expect("Time must be >=0");
+		let mut m = j.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 		// Convert from absolute time to sample time
 		m.delay = (m.delay * 48) / 1000000;
 		// Make a writer that converts the message into wire format at 48 kHz

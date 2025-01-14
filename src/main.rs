@@ -47,7 +47,7 @@
 //! - `jjy60` (currently unsupported)
 //! - `msf` (currently unsupported)
 //!
-//! [timezone]: tz
+//! [timezone]: time::tz
 //! [NTP]: sntp
 //!
 //! # Examples
@@ -69,21 +69,23 @@
 //! ```
 
 use std::error::Error;
+use std::num::NonZero;
 use std::process::ExitCode;
 
 use std::sync::{Arc, Condvar, Mutex};
-use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::mpsc::{sync_channel, Receiver};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 
 use args::{Arguments, ArgumentsError, SignalType};
+use time::TimeSpec;
+use error::MessageError;
 
+mod error;
 mod args;
-mod time;
 mod junghans;
 mod dcf77;
 mod wwvb;
-mod tz;
 mod sntp;
 
 /// A time signal message to transmit.
@@ -128,6 +130,25 @@ impl Message {
 			leap
 		}
 	}
+}
+
+/// Trait for time signal message generators.
+trait MessageGenerator {
+	/// Get a message for the given time.
+	///
+	/// It is up to the message generator to determine how to generate a message for `time`. For
+	/// example, Junghans and DCF77 encode the instant at the **end** of the message, while WWVB
+	/// encodes the instant at the **beginning** of the message.
+	///
+	/// It is also up to the message generator to use the fields in the returned [`Message`] as
+	/// needed, though by convention [`Message::packed`] and [`Message::packed_alt`] should be
+	/// transmitted LSB first, and [`Message::delay`] should be in nanoseconds (it will be converted
+	/// to sample time @ 48kHz by [`get_message`] before being passed to the associated writer
+	/// function).
+	///
+	/// This function should adjust `time` to the next timestamp for which a message should be
+	/// generated.
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, MessageError>;
 }
 
 /// Simple multi-threaded flag using a condition variable.
@@ -253,12 +274,14 @@ fn get_message(rx: &Receiver<Message>) -> Option<Message> {
 ///
 /// flagger.wait();
 /// ```
-fn make_writer<F>(rx: Receiver<Message>, flagger: Arc<Flagger>, mut func: F)
+fn make_writer<F>(rx: Receiver<Message>, flagger: Arc<Flagger>, count: NonZero<usize>, mut func: F)
 -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo)
 where F: FnMut(&mut Message, &mut [f32]) -> (usize, bool) + Send
 {
 	let mut state = WriterState::Waiting;
 	let mut message = Message::default();
+	let mut c = 0;
+	let count = count.get();
 
 	move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
 		// Check whether to transition state
@@ -287,10 +310,15 @@ where F: FnMut(&mut Message, &mut [f32]) -> (usize, bool) + Send
 				// If we reached the end of message, try to start writing the next message
 				// or simply finish the buffer with silence
 				if next {
+					c += 1;
 					if let Some(m) = get_message(&rx) {
 						message = m;
 					} else {
-						state = WriterState::Finishing;
+						if c < count {
+							state = WriterState::Waiting;
+						} else {
+							state = WriterState::Finishing;
+						}
 						data.iter_mut().skip(i).for_each(|v| *v = f32::EQUILIBRIUM);
 						break;
 					}
@@ -374,7 +402,7 @@ macro_rules! play {
 				// Create output stream & message writers
 				let stream = device.build_output_stream(
 								&config,
-								make_writer(rx, flagger.clone(), $mod::make_writer()),
+								make_writer(rx, flagger.clone(), $args.count, $mod::make_writer()),
 								audio_error,
 								None)?;
 				stream.play()?;
@@ -385,7 +413,7 @@ macro_rules! play {
 				// Get current time
 				let mut time = match $args.ntp {
 					Some(addr) => sntp::get_ntp_time(&addr)?,
-					None => time::currenttime().ok_or("Failed to get current system time")?
+					None => time::now().ok_or("Failed to get current system time")?
 				};
 
 				// Create time signal messages

@@ -7,6 +7,7 @@
 //! # Examples
 //!
 //! ```
+//! # use time::time::Tm;
 //! let date = Tm::new(1718617807).unwrap();
 //!	assert_eq!(date, Tm {
 //!		sec: 7,
@@ -20,7 +21,10 @@
 //!	});
 //! ```
 
-use std::{mem::MaybeUninit, ops::{Add, AddAssign}};
+use core::ops::{Add, AddAssign};
+#[cfg(feature = "now")]
+use core::mem::MaybeUninit;
+#[cfg(feature = "now")]
 use libc::{timespec, clock_gettime, CLOCK_REALTIME};
 
 /// A list of all leap seconds currently set and approved by IERS.
@@ -46,6 +50,7 @@ pub const LEAPSECONDS: [(i64, u8); 28] = [(63072000,   10), (78796800,   11), (9
 /// # Examples
 ///
 /// ```
+/// # use time::time::nextleapsecond;
 /// assert_eq!(nextleapsecond(525323527), Some((567993600,  24)));
 /// ```
 pub fn nextleapsecond(time: i64) -> Option<(i64, u8)> {
@@ -67,8 +72,10 @@ pub fn nextleapsecond(time: i64) -> Option<(i64, u8)> {
 /// # Examples
 ///
 /// ```
-/// let c = currenttime().expect("Failed to get current time");
-/// assert_eq!(c + Seconds(10), TimeSpec { sec: c.sec + 10, nsec: c.nsec});
+/// # use time::time::{Seconds, TimeSpec};
+/// // Jan 1, 2025. 12:00:00.123456789 UTC.
+/// let c = TimeSpec { sec: 1735732800, nsec: 123456789 };
+/// assert_eq!(c + Seconds(10), TimeSpec { sec: c.sec + 10, nsec: c.nsec });
 /// ```
 #[repr(transparent)]
 pub struct Seconds(pub i64);
@@ -80,9 +87,10 @@ pub struct Seconds(pub i64);
 /// # Examples
 ///
 /// ```
-/// let mut c = currenttime().expect("Failed to get current time");
-/// c.nsec = 5000000;
-/// assert_eq!(c + Nanoseconds(10), TimeSpec { sec: c.sec, nsec: 5000010});
+/// # use time::time::{Nanoseconds, TimeSpec};
+/// // Jan 1, 2025. 12:00:00.123456789 UTC.
+/// let mut c = TimeSpec { sec: 1735732800, nsec: 123456789 };
+/// assert_eq!(c + Nanoseconds(10), TimeSpec { sec: c.sec, nsec: 123456799});
 /// c.nsec = 999999999;
 /// assert_eq!(c + Nanoseconds(10), TimeSpec { sec: c.sec + 1, nsec: 9});
 /// ```
@@ -97,17 +105,19 @@ pub struct Nanoseconds(pub i64);
 /// # Examples
 ///
 /// ```
-/// let mut c = currenttime().expect("Failed to get current time");
-/// c.nsec = 999999999;
+/// # use time::time::{Seconds, Nanoseconds, TimeSpec};
+/// // Jan 1, 2025. 12:00:00.999999999 UTC.
+/// let mut c = TimeSpec { sec: 1735732800, nsec: 999999999 };
 /// assert_eq!(c + Seconds(10) + Nanoseconds(10), TimeSpec { sec: c.sec + 11, nsec: 9});
 /// ```
 ///
 /// Subtracting by adding a negative value:
 /// ```
+/// # use time::time::{Seconds, Nanoseconds, TimeSpec};
+/// # let mut c = TimeSpec { sec: 1735732800, nsec: 999999999 };
 /// assert_eq!(c + Seconds(-10), TimeSpec { sec: c.sec - 10, nsec: 999999999 });
 /// ```
-#[derive(Clone, Copy)]
-#[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TimeSpec {
 	/// Seconds since the Unix epoch
 	pub sec: i64,
@@ -115,8 +125,10 @@ pub struct TimeSpec {
 	pub nsec: i64
 }
 
+#[cfg_attr(docsrs, doc(cfg(feature = "now")))]
+#[cfg(feature = "now")]
 impl From<timespec> for TimeSpec {
-	/// Convert from libc::timespec to TimeSpec for better math ergonomics
+	/// Convert from `libc::timespec` to [`TimeSpec`] for better math ergonomics
 	fn from(value: timespec) -> Self {
 		TimeSpec {
 			sec: value.tv_sec,
@@ -179,17 +191,20 @@ impl Add for TimeSpec {
 
 /// Get the current time as a Unix timestamp with nanosecond granularity.
 ///
-/// This function will return `None` if [`clock_gettime`] fails.
+/// This function will return `None` if `libc::clock_gettime` fails.
 ///
 /// This function is thread safe.
 ///
 /// # Examples
 ///
 /// ```
-/// let c = currenttime().expect("Failed to get current time");
+/// # use time::time::now;
+/// let c = now().expect("Failed to get current time");
 /// assert!(c.sec > 0);
 /// ```
-pub fn currenttime() -> Option<TimeSpec> {
+#[cfg_attr(docsrs, doc(cfg(feature = "now")))]
+#[cfg(feature = "now")]
+pub fn now() -> Option<TimeSpec> {
 	let mut time = MaybeUninit::<timespec>::uninit();
 	// Safety:
 	// - clock_gettime does not read time, only writes
@@ -212,6 +227,7 @@ pub fn currenttime() -> Option<TimeSpec> {
 /// # Examples
 ///
 /// ```
+/// # use time::time::isleapyear;
 /// assert_eq!(isleapyear(1900), false);
 /// assert_eq!(isleapyear(2000), true);
 /// assert_eq!(isleapyear(2020), true);
@@ -278,6 +294,7 @@ pub const YEAR_ADJUST: i64 = 1900;
 /// # Examples
 ///
 /// ```
+/// # use time::time::Tm;
 /// let date = Tm::new(1718617807).unwrap();
 /// assert_eq!(date, Tm {
 /// 	sec: 7,
@@ -291,7 +308,7 @@ pub const YEAR_ADJUST: i64 = 1900;
 /// });
 /// ```
 #[derive(Clone, Copy)]
-#[cfg_attr(test, derive(Debug, PartialEq))]
+#[derive(Debug, PartialEq)]
 pub struct Tm {
 	/// Seconds, ranged [0, 59]
 	pub sec: u8,
@@ -390,6 +407,7 @@ impl Tm {
 /// # Examples
 ///
 /// ```
+/// # use time::time::timestamp_from_yd;
 /// assert_eq!(timestamp_from_yd(2024, 58, true), 1709078400);  // Feb 28, 2024
 /// assert_eq!(timestamp_from_yd(2024, 59, true), 1709164800);  // Feb 29, 2024
 /// assert_eq!(timestamp_from_yd(2024, 60, true), 1709251200);  // Mar  1, 2024
@@ -427,6 +445,7 @@ pub fn timestamp_from_yd(y: u16, doy: u16, leap: bool) -> i64 {
 /// # Examples
 ///
 /// ```
+/// # use time::time::timestamp_from_ymd;
 /// assert_eq!(timestamp_from_ymd(2024, 2, 28), 1709078400);
 /// assert_eq!(timestamp_from_ymd(2024, 2, 29), 1709164800);
 /// assert_eq!(timestamp_from_ymd(2024, 3, 1), 1709251200);
@@ -454,6 +473,7 @@ pub fn timestamp_from_ymd(y: u16, m: u8, d: u8) -> i64 {
 /// # Examples
 ///
 /// ```
+/// # use time::time::wday_from_ymd;
 /// assert_eq!(wday_from_ymd(2024, 1, 1), 1);   // Monday
 /// assert_eq!(wday_from_ymd(2024, 2, 28), 3);  // Wednesday
 /// assert_eq!(wday_from_ymd(2024, 2, 29), 4);  // Thursday
@@ -467,11 +487,11 @@ pub fn wday_from_ymd(y: u16, m: u8, d: u8) -> u8 {
 	//
 	// More details: https://arxiv.org/pdf/2102.06959
 	let factor = if m < 3 {
-		3 * (m as i64 - 1)
+		3 * m.wrapping_sub(1) as i64
 	} else {
 		(153 * m as i64 - 447) / 5
 	};
-	let y = if m < 3 { y as i64 - 1 } else { y as i64 };
+	let y = if m < 3 { y.wrapping_sub(1) as i64 } else { y as i64 };
 	((
 		y
 		+ y / YEARS_PER_LEAP_YEAR_1
@@ -486,7 +506,6 @@ pub fn wday_from_ymd(y: u16, m: u8, d: u8) -> u8 {
 ///
 /// `y` must be the absolute Gregorian calendar year, and `m` the 1-indexed month starting at
 /// January.
-#[inline(always)]
 pub fn days_per_month(y: u16, m: u8) -> u8 {
 	// Details: https://www.youtube.com/watch?v=J9KijLyP-yg&t=1470s
 	if m == 2 {
@@ -542,6 +561,7 @@ pub fn minute_of_century_from_timestamp(unixtimestamp: i64) -> u32 {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use core::mem::MaybeUninit;
 	use libc::{time_t, tm};
 
 	// Get the libc version of UTC calendar time
@@ -578,6 +598,23 @@ mod tests {
 		compare_dates(1844848207);
 		compare_dates(961235407);
 		compare_dates(929613007);
+
+		// Make sure extreme inputs cannot panic
+		Tm::new(i64::MAX);
+		Tm::new(i64::MIN);
+	}
+
+	#[test]
+	fn isleapyear_test() {
+		assert_eq!(isleapyear(1900), false);
+		assert_eq!(isleapyear(2000), true);
+		assert_eq!(isleapyear(2020), true);
+		assert_eq!(isleapyear(2023), false);
+		assert_eq!(isleapyear(2024), true);
+
+		// Make sur extreme inputs cannot panic
+		isleapyear(0);
+		isleapyear(u16::MAX);
 	}
 
 	#[test]
@@ -591,6 +628,12 @@ mod tests {
 		assert_eq!(timestamp_from_yd(2024, 59, false), 1709251200);
 		assert_eq!(timestamp_from_yd(2024, 300, true), 1729987200);
 		assert_eq!(timestamp_from_yd(2024, 300, false), 1730073600);
+
+		// Make sure extreme inputs cannot panic
+		timestamp_from_yd(0, 0, false);
+		timestamp_from_yd(u16::MAX, u16::MAX, false);
+		timestamp_from_yd(0, 0, true);
+		timestamp_from_yd(u16::MAX, u16::MAX, true);
 	}
 
 	#[test]
@@ -600,6 +643,10 @@ mod tests {
 		assert_eq!(timestamp_from_ymd(2024, 2, 29), 1709164800);
 		assert_eq!(timestamp_from_ymd(2024, 3, 1), 1709251200);
 		assert_eq!(timestamp_from_ymd(2024, 10, 27), 1729987200);
+
+		// Make sure extreme inputs cannot panic
+		timestamp_from_ymd(0, 0, 0);
+		timestamp_from_ymd(u16::MAX, u8::MAX, u8::MAX);
 	}
 
 	#[test]
@@ -609,6 +656,12 @@ mod tests {
 		assert_eq!(wday_from_ymd(2024, 2, 29), 4);
 		assert_eq!(wday_from_ymd(2024, 3, 1), 5);
 		assert_eq!(wday_from_ymd(2024, 10, 27), 0);
+
+		// Make sure extreme inputs cannot panic
+		let x = wday_from_ymd(0, 0, 0);
+		assert!(x < 7);
+		let x = wday_from_ymd(u16::MAX, u8::MAX, u8::MAX);
+		assert!(x < 7);
 	}
 
 	#[test]
@@ -626,6 +679,10 @@ mod tests {
 		assert_eq!(days_per_month(2024, 10), 31);
 		assert_eq!(days_per_month(2024, 11), 30);
 		assert_eq!(days_per_month(2024, 12), 31);
+
+		// Make sure extreme inputs cannot panic
+		days_per_month(0, 0);
+		days_per_month(u16::MAX, u8::MAX);
 	}
 
 	#[test]
@@ -636,6 +693,10 @@ mod tests {
 		assert_eq!(y_from_timestamp(1709251199), 2024);
 		assert_eq!(y_from_timestamp(1709251200), 2024);
 		assert_eq!(y_from_timestamp(1729987200), 2024);
+
+		// Make sure extreme inputs cannot panic
+		y_from_timestamp(i64::MIN);
+		y_from_timestamp(i64::MAX);
 	}
 
 	#[test]
@@ -643,71 +704,10 @@ mod tests {
 		assert_eq!(minute_of_century_from_timestamp(946684740), 52594559);
 		assert_eq!(minute_of_century_from_timestamp(946684800), 0);
 		assert_eq!(minute_of_century_from_timestamp(1469741399), 8717609);
-	}
 
-	#[test]
-	fn module_doctest() {
-		let date = Tm::new(1718617807).unwrap();
-		assert_eq!(date, Tm {
-			sec: 7,
-			min: 50,
-			hour: 9,
-			day: 17,
-			mon: 6,
-			year: 124,
-			wday: 1,
-			yday: 169
-		});
-
-		// Documentation for nextleapsecond
-		assert_eq!(nextleapsecond(525323527), Some((567993600,  24)));
-
-		// Documentation for currenttime
-		let c = currenttime().expect("Failed to get current time");
-		assert!(c.sec > 0);
-
-		// Documentation for Seconds
-		let c = currenttime().expect("Failed to get current time");
-		assert_eq!(c + Seconds(10), TimeSpec { sec: c.sec + 10, nsec: c.nsec});
-
-		// Documentation for Nanoseconds
-		let mut c = currenttime().expect("Failed to get current time");
-		c.nsec = 5000000;
-		assert_eq!(c + Nanoseconds(10), TimeSpec { sec: c.sec, nsec: 5000010});
-		c.nsec = 999999999;
-		assert_eq!(c + Nanoseconds(10), TimeSpec { sec: c.sec + 1, nsec: 9});
-
-		// Documentation for TimeSpec
-		let mut c = currenttime().expect("Failed to get current time");
-		c.nsec = 999999999;
-		assert_eq!(c + Seconds(10) + Nanoseconds(10), TimeSpec { sec: c.sec + 11, nsec: 9});
-		assert_eq!(c + Seconds(-10), TimeSpec { sec: c.sec - 10, nsec: 999999999 });
-
-		// Documentation for isleapyear
-		assert_eq!(isleapyear(1900), false);
-		assert_eq!(isleapyear(2000), true);
-		assert_eq!(isleapyear(2020), true);
-		assert_eq!(isleapyear(2023), false);
-		assert_eq!(isleapyear(2024), true);
-
-		// Documentation for timestamp_from_yd
-		assert_eq!(timestamp_from_yd(2024, 58, true), 1709078400);  // Feb 28, 2024
-		assert_eq!(timestamp_from_yd(2024, 59, true), 1709164800);  // Feb 29, 2024
-		assert_eq!(timestamp_from_yd(2024, 60, true), 1709251200);  // Mar  1, 2024
-		assert_eq!(timestamp_from_yd(2024, 58, false), 1709078400); // Feb 28, 2024
-		assert_eq!(timestamp_from_yd(2024, 59, false), 1709251200); // Mar  1, 2024
-
-		// Documentation for timestamp_from_ymd
-		assert_eq!(timestamp_from_ymd(2024, 2, 28), 1709078400);
-		assert_eq!(timestamp_from_ymd(2024, 2, 29), 1709164800);
-		assert_eq!(timestamp_from_ymd(2024, 3, 1), 1709251200);
-
-		// Documentation for wday_from_ymd
-		assert_eq!(wday_from_ymd(2024, 1, 1), 1);   // Monday
-		assert_eq!(wday_from_ymd(2024, 2, 28), 3);  // Wednesday
-		assert_eq!(wday_from_ymd(2024, 2, 29), 4);  // Thursday
-		assert_eq!(wday_from_ymd(2024, 3, 1), 5);   // Friday
-		assert_eq!(wday_from_ymd(2024, 10, 27), 0); // Sunday
+		// Make sure extreme inputs cannot panic
+		minute_of_century_from_timestamp(i64::MIN);
+		minute_of_century_from_timestamp(i64::MAX);
 	}
 
 	// #[bench]

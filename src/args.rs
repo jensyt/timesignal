@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::fmt::{Display, Debug};
 use std::num::NonZero;
 use std::str::FromStr;
-use crate::{tz, tz::Timezone};
+use time::tz::{self, Timezone, TzFileError};
 
 /// Known time signal types.
 ///
@@ -84,7 +84,7 @@ pub enum ArgumentsError {
 	MissingParameter(String),
 	/// An error occured while parsing the provided timezone. The underlying timezone error is
 	/// returned as the payload for this variant.
-	TimezoneError(tz::Error),
+	TimezoneError(TzFileError),
 	/// Help option (-h) was included, so print help details and exit.
 	Help
 }
@@ -209,8 +209,8 @@ impl Arguments {
 				t @ ("-t" | "--timezone") => {
 					if let Some(a) = args.next() {
 						timezone = Some(tz::parse_file(a.as_os_str()).or_else(|e| {
-							if let tz::Error::FileReadError(_) = e {
-								tz::parse_tzstring(a.as_encoded_bytes())
+							if let TzFileError::FileReadError(_) = e {
+								tz::parse_tzstring(a.as_encoded_bytes()).map_err(TzFileError::from)
 							} else {
 								Err(e)
 							}

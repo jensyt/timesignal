@@ -540,11 +540,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "time"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "timesignal"
 version = "0.1.0"
 dependencies = [
  "cpal",
- "libc",
+ "time",
 ]
 
 [[package]]

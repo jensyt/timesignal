@@ -39,8 +39,10 @@
 //! }
 //! ```
 
-use std::{error, f32::consts::PI, fmt};
-use crate::{time::{nextleapsecond, Seconds, TimeSpec}, tz::{self, Timezone}, Message};
+use std::f32::consts::PI;
+use time::{nextleapsecond, Seconds, TimeSpec, tz::{self, Timezone}};
+use crate::{Message, MessageGenerator};
+pub use crate::error::MessageError as Error;
 
 /// Pseudorandom chip sequence for phase modulated signal.
 ///
@@ -62,39 +64,6 @@ use crate::{time::{nextleapsecond, Seconds, TimeSpec}, tz::{self, Timezone}, Mes
 /// }
 /// ```
 const PM_CHIP_SEQUENCE: &[u8; 512] = include_bytes!("../assets/dcf77_chip_sequence.bin");
-
-/// The error type for constructing DCF77 messages.
-pub enum Error {
-	/// The input time is before the Unix epoch (Jan 1, 1970) and not supported. The unsupported time
-	/// is provided in the payload.
-	UnsupportedTime(i64),
-	/// Error parsing the default timezone. The underlying error is provided in the payload.
-	TimezoneError(tz::Error)
-}
-
-impl fmt::Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Error::UnsupportedTime(x) => write!(f, "Unsupported time: {}", x),
-			Error::TimezoneError(x) => write!(f, "Timezone error: {}", x)
-		}
-	}
-}
-
-impl fmt::Debug for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		fmt::Display::fmt(self, f)
-	}
-}
-
-impl error::Error for Error {
-	fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-		match self {
-			Error::UnsupportedTime(_) => None,
-			Error::TimezoneError(x) => Some(x)
-		}
-	}
-}
 
 /// An unpacked / uncompressed DCF77 message.
 ///
@@ -310,7 +279,9 @@ impl DCF77 {
 						.map_err(|e| Error::TimezoneError(e))
 		}
 	}
+}
 
+impl MessageGenerator for DCF77 {
 	/// Get a message for the given time.
 	///
 	/// This function returns a message for the minute after `time`, i.e. the message represents the
@@ -357,7 +328,7 @@ impl DCF77 {
 	/// assert_eq!(message.delay, 0);
 	/// assert_eq!(message.leap, false);
 	/// ```
-	pub fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
 		// Find the next minute (exactly)
 		let time_in_min = time.sec % 60;
 		let sec = time.sec - time_in_min + 60;
@@ -571,7 +542,7 @@ mod tests {
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		crate::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").unwrap()
+		time::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").unwrap()
 	}
 
 	#[test]
@@ -851,7 +822,7 @@ mod tests {
 		let d = DCF77::new(None).unwrap();
 
 		// Get a message for the current time
-		let m = d.get_message(&mut crate::time::currenttime().unwrap());
+		let m = d.get_message(&mut time::now().unwrap());
 		match m {
 			Ok(mut m) => {
 				// Convert real time (nanoseconds) to sample time (48 kHz)
@@ -902,7 +873,7 @@ mod tests {
 			Err(_) => {
 				// Known valid offset (UTC+1 / UTC+2) that cannot fail
 				let _d = DCF77::new(
-					crate::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
+					time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
 				).unwrap();
 				// Create & use messages
 			}
@@ -914,7 +885,7 @@ mod tests {
 		let d = DCF77::new(None).expect("Error reading Berlin timezone");
 
 		// Get a message for the current time
-		let mut m = d.get_message(&mut crate::time::currenttime().unwrap()).expect("Time must be >=0");
+		let mut m = d.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 		// Convert from absolute time to sample time
 		m.delay = (m.delay * 48) / 1000000;
 		// Make a writer that converts the message into wire format at 48 kHz

@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 repository = "https://github.com/jensyt/timesignal"
 
+[workspace]
+
 [dependencies]
-libc = "0.2"
 cpal = "0.15.3"
+time = { path = "crates/time", features = ["std"] }
 
 [profile.dev]
 debug = 0

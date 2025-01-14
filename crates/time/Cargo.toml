@@ -1,0 +1,17 @@
+[package]
+name = "time"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/jensyt/timesignal"
+
+[dependencies]
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+libc = "0.2"
+
+[features]
+default = []
+std = ["now", "alloc"]
+now = ["dep:libc"]
+alloc = []

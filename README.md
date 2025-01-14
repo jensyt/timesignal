@@ -20,6 +20,8 @@ Why use this instead of the many other time signal generators available? Three p
 
 ## Quick Setup Guide
 1. Install a recent version of [Rust].
+    - On Linux, you may also need to install the `libasound2-dev` package on Debian-based
+      distributions or `alsa-lib-devel` on Fedora.
 2. Clone this repository.
 3. Run `cargo run -r -- <signal>` in the root directory. Try `wwvb` for signal.
 

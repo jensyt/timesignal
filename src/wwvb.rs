@@ -46,11 +46,11 @@
 //! }
 //! ```
 
-use crate::time::{minute_of_century_from_timestamp, nextleapsecond, wday_from_ymd, Seconds, TimeSpec, Tm};
-use crate::tz::{self, Timezone, TzDateRule};
-use crate::Message;
+use time::{minute_of_century_from_timestamp, nextleapsecond, wday_from_ymd, Seconds, TimeSpec, Tm};
+use time::tz::{self, Timezone, TzDateRule};
+use crate::{Message, MessageGenerator};
+pub use crate::error::MessageError as Error;
 use std::f32::consts::PI;
-use std::{fmt, error};
 
 /// All known UT1-UTC offsets.
 ///
@@ -178,32 +178,6 @@ const NEXT_DST_FALL: [u8; 24] = [0x37, 0x0D, 0x32,  // 4th Sunday before N1; 1am
 								 0x25, 0x0E, 0x34,  // 3rd Sunday of November; 1am, 2am, 3am
 								 0x3D, 0x29, 0x1C]; // 4th Sunday of November; 1am, 2am, 3am
 
-/// The error type for constructing WWVB messages.
-pub enum Error {
-	/// The input time is before the Unix epoch (Jan 1, 1970) and not supported. The unsupported time
-	/// is provided in the payload.
-	UnsupportedTime(i64),
-	/// Error parsing the default timezone. The underlying error is provided in the payload.
-	TimezoneError(tz::Error)
-}
-
-impl fmt::Display for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Error::UnsupportedTime(x) => write!(f, "Unsupported time: {}", x),
-			Error::TimezoneError(x) => write!(f, "Timezone error: {}", x)
-		}
-	}
-}
-
-impl fmt::Debug for Error {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		fmt::Display::fmt(self, f)
-	}
-}
-
-impl error::Error for Error {}
-
 /// Get the codeword associated with next scheduled DST transition.
 ///
 /// This function supports all [Enhanced WWVB] DST transition codes defined in Table 8, except when
@@ -231,9 +205,8 @@ impl error::Error for Error {}
 /// ```
 fn next_dst(year: u16, isdst: bool, timezone: &Timezone) -> u8 {
 	// Get the DST rule if it exists
-	let dst = match timezone.spec().and_then(|v| v.dst.map(|(_, dst)| dst)) {
-		Some(dst) => dst,
-		None => { return 0x07 } // No DST
+	let Some(dst) = timezone.spec().and_then(|v| v.dst.map(|(_, dst)| dst)) else {
+		return 0x07; // No DST
 	};
 
 	if isdst {
@@ -538,7 +511,9 @@ impl WWVB {
 						.map_err(|e| Error::TimezoneError(e))
 		}
 	}
+}
 
+impl MessageGenerator for WWVB {
 	/// Get a message for the given time.
 	///
 	/// This function returns a message for the minute that started on or before `time`, i.e. the
@@ -585,7 +560,7 @@ impl WWVB {
 	/// assert_eq!(message.delay, 0);
 	/// assert_eq!(message.leap, false);
 	/// ```
-	pub fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
 		// Find the start of this minute (exactly)
 		let time_in_min = time.sec % 60;
 		let sec = time.sec - time_in_min;
@@ -805,7 +780,7 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 
 #[cfg(test)]
 mod tests {
-	use crate::tz;
+	use time::tz;
 	use super::*;
 
 	#[test]
@@ -1068,7 +1043,7 @@ mod tests {
 		let d = WWVB::new(None).unwrap();
 
 		// Get a message for the current time
-		let m = d.get_message(&mut crate::time::currenttime().unwrap());
+		let m = d.get_message(&mut time::now().unwrap());
 		match m {
 			Ok(mut m) => {
 				// Convert real time (nanoseconds) to sample time (48 kHz)

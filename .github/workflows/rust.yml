@@ -31,15 +31,5 @@ jobs:
       run: sudo apt-get install -y libasound2-dev
     - name: Build
       run: cargo test --workspace --all-features --no-run
-  test:
-    needs:
-      - build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    steps:
     - name: Run tests
       run: cargo test --workspace --all-features --no-fail-fast

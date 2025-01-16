@@ -86,7 +86,6 @@ mod args;
 mod junghans;
 mod dcf77;
 mod wwvb;
-mod sntp;
 
 /// A time signal message to transmit.
 #[derive(Default)]

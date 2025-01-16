@@ -8,6 +8,7 @@
 //! # Examples
 //!
 //! ```
+//! # use sntp::get_ntp_time;
 //! match get_ntp_time("time.google.com") {
 //! 	Ok(t) => assert!(t.sec > 0),
 //! 	Err(e) => eprintln!("Error querying time.google.com: {e}")
@@ -46,7 +47,7 @@ impl NtpTimestamp {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// assert_eq!(NtpTimestamp::new(0x12345678, 0x98765432).0, 0x1234567898765432);
 	/// ```
 	fn new(sec: u32, frac: u32) -> Self {
@@ -59,7 +60,7 @@ impl NtpTimestamp {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let wire = NtpTimestamp::new(0x12345678, 0x98765432).to_wire_format();
 	/// if cfg!(target_endian = "big") {
 	/// 	assert_eq!(wire, 0x1234567898765432);
@@ -77,7 +78,7 @@ impl NtpTimestamp {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let timestamp = NtpTimestamp::from_wire_format(0x1234567898765432);
 	/// if cfg!(target_endian = "big") {
 	/// 	assert_eq!(timestamp.0, 0x1234567898765432);
@@ -99,7 +100,7 @@ impl NtpTimestamp {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let timestamp = NtpTimestamp::from_wire_format_short(0x12345678);
 	/// if cfg!(target_endian = "big") {
 	/// 	assert_eq!(timestamp.0, 0x0000123456780000);
@@ -152,7 +153,7 @@ impl From<TimeSpec> for NtpTimestamp {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let t1 = NtpTimestamp::new(0x1, 0x80000000); // 1.500s
 /// let t2 = NtpTimestamp::new(0x2, 0x60000000); // 2.375s
 /// let d = t2 - t1;
@@ -171,7 +172,7 @@ impl NtpTimestampDiff {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let t1 = NtpTimestamp::new(0x1, 0x80000000); // 1.500s
 	/// let t2 = NtpTimestamp::new(0x2, 0x60000000); // 2.375s
 	/// let d = t2 - t1;           // 0.875s
@@ -190,7 +191,7 @@ impl NtpTimestampDiff {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let t1 = NtpTimestamp::new(0x1, 0x80000000); // 1.500s
 	/// let t2 = NtpTimestamp::new(0x2, 0x60000000); // 2.375s
 	/// let d = t2 - t1;                    // 0.875
@@ -251,7 +252,7 @@ impl From<NtpTimestampDiff> for TimeSpec {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let t1 = NtpTimestamp::new(0x1, 0x80000000); // 1.500s
 	/// let t2 = NtpTimestamp::new(0x2, 0x60000000); // 2.375s
 	/// let d = t2 - t1;
@@ -275,7 +276,7 @@ impl From<NtpTimestampDiff> for TimeSpec {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let m = NtpMessage::new(NtpTimestamp::new(0x11223344, 0x55667788));
 /// if cfg!(target_endian = "big") {
 /// 	assert_eq!(m.tx_time, 0x1122334455667788);
@@ -342,7 +343,7 @@ impl NtpMessage {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let msg = NtpMessage::new(...);
 	/// socket.send(msg.as_bytes()).unwrap();
 	/// ```
@@ -361,7 +362,7 @@ impl NtpMessage {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let mut msg = NtpMessage::new(...);
 	/// let bytes = socket.recv(msg.as_bytes_mut()).unwrap();
 	/// if bytes != size_of::<NtpMessage>() {
@@ -387,7 +388,7 @@ impl NtpMessage {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let mut ntp = NtpService::new();
 /// match ntp.query_server("time.google.com") {
 /// 	Ok((t, e)) => {
@@ -444,7 +445,7 @@ impl NtpService {
 	///
 	/// # Examples
 	///
-	/// ```
+	/// ```ignore
 	/// let mut ntp = NtpService::new();
 	/// match ntp.query_server("time.google.com") {
 	/// 	Ok((t, e)) => {
@@ -503,7 +504,7 @@ impl NtpService {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert_eq!(normalize_address("time.google.com").unwrap(), "time.google.com:123");
 /// assert_eq!(normalize_address("time.google.com:321").unwrap(), "time.google.com:321");
 /// assert_eq!(normalize_address("127.0.0.1").unwrap(), "127.0.0.1:123");
@@ -555,7 +556,7 @@ fn normalize_address(addr: &str) -> Result<String, io::Error> {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// match get_ntp_time("time.google.com") {
 /// 	Ok(t) => assert!(t.sec > 0),
 /// 	Err(e) => eprintln!("Error querying time.google.com: {e}")

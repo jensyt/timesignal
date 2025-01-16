@@ -9,6 +9,7 @@ repository = "https://github.com/jensyt/timesignal"
 [dependencies]
 cpal = "0.15.3"
 time = { path = "crates/time", features = ["std"] }
+sntp = { path = "crates/sntp" }
 
 [profile.dev]
 debug = 0

@@ -13,3 +13,4 @@ doctest:
 doc:
 	cargo +nightly rustdoc --all-features -- --cfg docsrs --document-private-items
 	cargo +nightly rustdoc --all-features -p time  -- --cfg docsrs --document-private-items
+	cargo +nightly rustdoc --all-features -p sntp  -- --cfg docsrs --document-private-items

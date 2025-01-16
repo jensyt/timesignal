@@ -1,0 +1,8 @@
+[package]
+name = "sntp"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/jensyt/timesignal"
+
+[dependencies]
+time = { path = "../time", features = ["now"] }

@@ -612,7 +612,9 @@ impl MessageGenerator for Junghans {
 	/// # use signals::junghans::Junghans;
 	/// # use signals::MessageGenerator;
 	/// # use time::TimeSpec;
-	/// let j = Junghans::new(None).unwrap();
+	/// let j = Junghans::new(
+	/// 	time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+	/// ).unwrap();
 	/// // Sun, May 26, 2024. 16:58:10 UTC.
 	/// let mut time = TimeSpec {
 	/// 	sec: 1716742690,

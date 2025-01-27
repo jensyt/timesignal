@@ -215,9 +215,8 @@ impl Timezone {
 	/// While it may seem like there can only be two offsets (standard and daylight savings time),
 	/// it's possible for precomputed transition times to span over changes in DST rules. This may
 	/// be rare, but do not assume there are only two possible offset values.
-	#[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 	#[cfg(feature = "alloc")]
-	pub fn offsets(&self) -> Vec<i32> {
+	pub fn offsets(&self) -> impl IntoIterator<Item = i32> {
 		let mut r: Vec<i32> = Vec::with_capacity(8);
 		// Closure to append only unique values
 		let mut append = |v| {
@@ -236,6 +235,26 @@ impl Timezone {
 			append(spec.utoff);
 			if let Some((dst, _)) = spec.dst {
 				append(dst);
+			}
+		}
+
+		r
+	}
+
+	/// Get the set of unique UTC offsets (in seconds) in this timezone.
+	///
+	/// This function returns an array with two elements, but the second element will be equal to the
+	/// first if no DST rule is set. If no [`TzSpec`] is set, both values will be `0`.
+	#[cfg(not(feature = "alloc"))]
+	pub fn offsets(&self) -> impl IntoIterator<Item = i32> {
+		let mut r = [0, 0];
+
+		// Append optional TZ spec times
+		if let Some(spec) = self.spec {
+			r[0] = spec.utoff;
+			match spec.dst {
+				Some((dst, _)) => r[1] = dst,
+				None => r[1] = r[0]
 			}
 		}
 
@@ -299,24 +318,37 @@ mod tests {
 		assert_eq!(tz.info(1730613600), TzInfo { utoff: -18000, isdst: false });
 	}
 
-	#[cfg(feature = "alloc")]
+	#[cfg(not(feature = "alloc"))]
 	#[test]
 	fn timezone_offsets() {
+		let mut tz = Timezone {
+			spec: None
+		};
+
+		assert!(tz.offsets().into_iter().eq([0, 0]));
+
+		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
+		assert!(tz.offsets().into_iter().eq([-18000, -14400]));
+	}
+
+	#[cfg(feature = "alloc")]
+	#[test]
+	fn timezone_offsets_alloc() {
 		let mut tz = Timezone {
 			times: Box::default(),
 			spec: None
 		};
 
-		assert_eq!(tz.offsets(), alloc::vec!());
+		assert_eq!(tz.offsets().into_iter().count(), 0);
 
 		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
-		assert_eq!(tz.offsets(), alloc::vec![-18000, -14400]);
+		assert!(tz.offsets().into_iter().eq([-18000, -14400]));
 
 		tz.times = Box::new([(1710054000, TzInfo { utoff: -20000, isdst: false }),
 		 					 (1720054000, TzInfo { utoff: -10000, isdst: true }),
 							 (1730054000, TzInfo { utoff: -20000, isdst: false }),
 							 (1740054000, TzInfo { utoff: -10000, isdst: true }),
 							 (1750054000, TzInfo { utoff: -5000, isdst: false })]);
-		assert_eq!(tz.offsets(), alloc::vec![-20000, -10000, -5000, -18000, -14400]);
+		assert!(tz.offsets().into_iter().eq([-20000, -10000, -5000, -18000, -14400]));
 	}
 }

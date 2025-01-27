@@ -9,7 +9,7 @@
 //! [DCF77]: https://en.wikipedia.org/wiki/DCF77
 //! [WWVB]: https://en.wikipedia.org/wiki/WWVB
 //! [JJY40/60]: https://en.wikipedia.org/wiki/JJY
-//! [Junghans]: junghans
+//! [Junghans]: signals::junghans
 //!
 //! # Command Line Arguments
 //!
@@ -78,77 +78,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 
 use args::{Arguments, ArgumentsError, SignalType};
-use time::TimeSpec;
-use error::MessageError;
+use signals::{Message, SampledMessage, MessageGenerator, dcf77, junghans, wwvb};
 
-mod error;
 mod args;
-mod junghans;
-mod dcf77;
-mod wwvb;
-
-/// A time signal message to transmit.
-#[derive(Default)]
-struct Message {
-	/// The packed, binary message to be transmitted. LSB first by convention, but technially each
-	/// time signal module can decide how to interpret this value.
-	packed: u64,
-	/// An alternate, packed, binary message to be transmitted. This is useful for time signals that
-	/// transmit both an amplitude and phase modulated message, where the messages may be different
-	/// between the two formats (e.g. WWVB).
-	packed_alt: u64,
-	/// Time-signal-dependent time delay, used to ensure message transmission aligns exactly with the
-	/// time being transmitted.
-	delay: i64,
-	/// Whether the message represents a time period or instant that includes a leap second, which
-	/// requires special handling in most time signals.
-	leap: bool
-}
-
-impl Message {
-	/// Create a new message.
-	///
-	/// This function sets [`Message::packed_alt`] to `0` and [`Message::leap`] to `false`.
-	fn new(packed: u64, delay: i64) -> Message {
-		Message {
-			packed,
-			packed_alt: 0,
-			delay,
-			leap: false
-		}
-	}
-
-	/// Create a new message with all fields.
-	///
-	/// This function does not do any further processing on the inputs.
-	fn new_with_alt(packed: u64, packed_alt: u64, delay: i64, leap: bool) -> Message {
-		Message {
-			packed,
-			packed_alt,
-			delay,
-			leap
-		}
-	}
-}
-
-/// Trait for time signal message generators.
-trait MessageGenerator {
-	/// Get a message for the given time.
-	///
-	/// It is up to the message generator to determine how to generate a message for `time`. For
-	/// example, Junghans and DCF77 encode the instant at the **end** of the message, while WWVB
-	/// encodes the instant at the **beginning** of the message.
-	///
-	/// It is also up to the message generator to use the fields in the returned [`Message`] as
-	/// needed, though by convention [`Message::packed`] and [`Message::packed_alt`] should be
-	/// transmitted LSB first, and [`Message::delay`] should be in nanoseconds (it will be converted
-	/// to sample time @ 48kHz by [`get_message`] before being passed to the associated writer
-	/// function).
-	///
-	/// This function should adjust `time` to the next timestamp for which a message should be
-	/// generated.
-	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, MessageError>;
-}
 
 /// Simple multi-threaded flag using a condition variable.
 ///
@@ -222,11 +154,10 @@ enum WriterState {
 /// The [`Message::delay`] field in the returned message is converted from real time in nanoseconds
 /// to sample space at 48 kHz, meaning 1 unit of delay is 20.833 microseconds.
 #[inline(always)]
-fn get_message(rx: &Receiver<Message>) -> Option<Message> {
-	if let Ok(mut m) = rx.try_recv() {
+fn get_message(rx: &Receiver<Message>) -> Option<SampledMessage<48000>> {
+	if let Ok(m) = rx.try_recv() {
 		// Convert delay to samples
-		m.delay = (m.delay * 48) / 1000000;
-		Some(m)
+		Some(m.sample())
 	} else {
 		None
 	}
@@ -275,10 +206,10 @@ fn get_message(rx: &Receiver<Message>) -> Option<Message> {
 /// ```
 fn make_writer<F>(rx: Receiver<Message>, flagger: Arc<Flagger>, count: NonZero<usize>, mut func: F)
 -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo)
-where F: FnMut(&mut Message, &mut [f32]) -> (usize, bool) + Send
+where F: FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool) + Send
 {
 	let mut state = WriterState::Waiting;
-	let mut message = Message::default();
+	let mut message = Default::default();
 	let mut c = 0;
 	let count = count.get();
 
@@ -368,7 +299,7 @@ fn audio_error(error: cpal::StreamError) {
 /// - `&str` for several untyped errors (no output audio device, failed to get system time,
 ///    unsupported signal type).
 /// - [`std::io::Error`] for NTP errors.
-/// - Any of the unique timesignal module error types (e.g. [`junghans::Error`]).
+/// - [`signals::MessageError`] for message generation errors.
 /// - [`std::sync::mpsc::SendError`] for errors sending messages to the audio output thread.
 ///
 /// # Examples
@@ -401,7 +332,7 @@ macro_rules! play {
 				// Create output stream & message writers
 				let stream = device.build_output_stream(
 								&config,
-								make_writer(rx, flagger.clone(), $args.count, $mod::make_writer()),
+								make_writer(rx, flagger.clone(), $args.count, $mod::make_writer::<48000>()),
 								audio_error,
 								None)?;
 				stream.play()?;
@@ -440,7 +371,7 @@ macro_rules! play {
 /// - `&str` for several untyped errors (no output audio device, failed to get system time,
 ///    unsupported signal type).
 /// - [`std::io::Error`] for NTP errors.
-/// - Any of the unique timesignal module error types (e.g. [`junghans::Error`]).
+/// - [`signals::MessageError`] for message generation errors.
 /// - [`std::sync::mpsc::SendError`] for errors sending messages to the audio output thread.
 ///
 /// # Examples

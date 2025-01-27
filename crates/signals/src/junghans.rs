@@ -6,20 +6,22 @@
 //! # Examples
 //!
 //! ```
+//! # use signals::junghans::{Junghans, make_writer};
+//! # use signals::MessageGenerator;
 //! // Construct a Junghans object to generate messages
 //!	let j = Junghans::new(
 //!				// Timezone is used to configure the watch's local time
-//!				crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+//!				time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 //!			).expect("Invalid timezone offset");
 //!
 //!	// Get a message for the current time
-//!	let m = j.get_message(&mut crate::time::currenttime().unwrap());
+//!	let m = j.get_message(&mut time::now().unwrap());
 //!	match m {
-//!		Ok(mut m) => {
-//! 		// Convert real time (nanoseconds) to sample time (48 kHz)
-//!			m.delay = (m.delay * 48) / 1000000;
+//!		Ok(m) => {
 //!			// Make a writer that converts the message into wire format at 48 kHz
-//!			let mut writer = make_writer();
+//!			let mut writer = make_writer::<48000>();
+//! 		// Convert real time (nanoseconds) to sample time (48 kHz)
+//!			let mut s = m.sample();
 //!			// Create a buffer with enough space to hold the entire 15s encoded message
 //!			let mut buf = Vec::<f32>::with_capacity(800000);
 //!			unsafe {
@@ -27,7 +29,7 @@
 //!			}
 //!			let buf = buf.as_mut_slice();
 //!			// Write the message to the buffer
-//!			writer(&mut m, buf);
+//!			writer(&mut s, buf);
 //!
 //!			// Use the results in buf
 //!		},
@@ -116,11 +118,12 @@
 //! in a message is always odd, which guarantees that the remaining padding time needed is evenly
 //! divisible by 200 ms after adding the final 300 ms 1 bit.
 
-use crate::{Message, MessageGenerator};
-pub use crate::error::MessageError as Error;
+use core::f32::consts::PI;
+use crate::{Message, MessageError, MessageGenerator, SampledMessage};
 #[cfg(debug_assertions)]
-use std::fmt;
+use core::fmt;
 use time::{Nanoseconds, TimeSpec, Tm, tz::{self, Timezone}};
+use crate::sin32;
 
 /// Table of valid timezone offsets.
 ///
@@ -181,7 +184,7 @@ use time::{Nanoseconds, TimeSpec, Tm, tz::{self, Timezone}};
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // UTC-9
 /// let mut offset = -9;
 /// // Offset such that UTC-12 is zero
@@ -225,7 +228,7 @@ const TIMEZONE_OFFSET: [u8; 105] = [0x14, 0xff, 0xff, 0xff, 0x13, 0xff, 0xff, 0x
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// let message = b"test";
 /// let checksum = message.iter()
 /// 	.copied()
@@ -275,7 +278,7 @@ const CHECKSUM_TABLE: [u8; 256] = [0x00, 0x5e, 0xbc, 0xe2, 0x61, 0x3f, 0xdd, 0x8
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// assert_eq!(make_checksum_index(0x12, 0xab), 0xb2);
 /// ```
 #[inline(always)]
@@ -291,9 +294,9 @@ fn make_checksum_index(lower: u8, upper: u8) -> u8 {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // US Pacific timezone, UTC-8 (standard time) / UTC-7 (daylight savings time)
-/// let timezone = crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok();
+/// let timezone = time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok();
 ///
 /// // Sunday, May 26, 2024. 09:58:25 UTC-7 / 16:58:25 UTC.
 /// let m = MessageUncompressed::new(1716742705, &timezone).unwrap();
@@ -365,11 +368,11 @@ impl MessageUncompressed {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if `time < 0`. This function intentionally does not return
-	/// [`Error::UnsupportedTimezoneOffset`], and instead defaults to UTC (zero offset) if the
-	/// timezone's offset cannot be represented in the Junghans format.
-	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, Error> {
-		let utc = Tm::new(time).ok_or(Error::UnsupportedTime(time))?;
+	/// Returns [`MessageError::UnsupportedTime`] if `time < 0`. This function intentionally does not
+	/// return [`MessageError::UnsupportedTimezoneOffset`], and instead defaults to UTC (zero offset)
+	/// if the timezone's offset cannot be represented in the Junghans format.
+	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, MessageError> {
+		let utc = Tm::new(time).ok_or(MessageError::UnsupportedTime(time))?;
 		let local = timezone.info(time);
 
 		let offset = (local.utoff / 900) + 48;
@@ -455,8 +458,9 @@ impl MessageUncompressed {
 }
 
 #[cfg(debug_assertions)]
+#[cfg_attr(docsrs, doc(cfg(debug_assertions)))]
 impl fmt::Debug for MessageUncompressed {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
 		write!(f,
 			"{}{}:{}{}:{}{} day_{}{}{} year_{}{} offset_{} dst_{} isleap_{} checksum_{:#02x}",
 			self.utc_hour_tens,
@@ -486,16 +490,18 @@ impl fmt::Debug for MessageUncompressed {
 /// # Examples
 ///
 /// ```
+/// # use signals::junghans::Junghans;
+/// # use signals::MessageGenerator;
 /// // Construct a Junghans object to generate messages
 ///	let j = Junghans::new(
 ///				// Timezone is used to configure the watch's local time
-///				crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+///				time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 ///			).expect("Invalid timezone offset");
 ///
 ///	// Get a message for the current time
-///	let m = j.get_message(&mut crate::time::currenttime().unwrap());
+///	let m = j.get_message(&mut time::now().unwrap());
 ///	match m {
-///		Ok(mut m) => {
+///		Ok(_m) => {
 ///			// Use the message
 ///		},
 ///		Err(e) => {
@@ -514,7 +520,7 @@ pub struct Junghans {
 ///
 /// This is a convenience function, see [`Junghans::new`] for details.
 #[inline(always)]
-pub fn new(local_tz: Option<Timezone>) -> Result<Junghans, Error> {
+pub fn new(local_tz: Option<Timezone>) -> Result<Junghans, MessageError> {
 	Junghans::new(local_tz)
 }
 
@@ -524,19 +530,21 @@ impl Junghans {
 	/// This function checks if the supplied timezone can be properly represented in the Junghans
 	/// format. See [`TIMEZONE_OFFSET`] for more details on valid configurations.
 	///
-	/// If the input `local_tz` is `None`, this function defaults to reading `/etc/localtime` for
-	/// timezone information.
+	/// If the input `local_tz` is `None`, this function defaults to `UTC0` or reading
+	/// `/etc/localtime` (feature `std`) for timezone information.
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTimezoneOffset`] if the timezone offset cannot be represented in
-	/// Junghans's format, or [`Error::TimezoneError`] if there was an error reading `/etc/localtime`.
+	/// Returns [`MessageError::UnsupportedTimezoneOffset`] if the timezone offset cannot be
+	/// represented in Junghans's format, or [`MessageError::TimezoneError`] if there was an error
+	/// reading `/etc/localtime`.
 	///
 	/// # Examples
 	///
 	/// ```
+	/// # use signals::junghans::Junghans;
 	/// let j = Junghans::new(
-	/// 	Some(crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok())
+	/// 	time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 	/// );
 	/// match j {
 	/// 	Ok(_j) => {
@@ -545,23 +553,27 @@ impl Junghans {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC-8 / UTC-7) that cannot fail
 	/// 		let _j = Junghans::new(
-	/// 			crate::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap()
+	/// 			time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
 	/// }
 	/// ```
-	pub fn new(local_tz: Option<Timezone>) -> Result<Junghans, Error> {
+	pub fn new(local_tz: Option<Timezone>) -> Result<Junghans, MessageError> {
 		let local_tz = match local_tz {
 			Some(t) => t,
+			#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 			None => tz::parse_file("/etc/localtime")
-						.map_err(|e| Error::TimezoneError(e))?
+						.map_err(|e| MessageError::TimezoneError(e))?,
+			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
+			None => tz::parse_tzstring(b"UTC0")
+						.map_err(|e| MessageError::TimezoneError(e))?
 		};
 
 		for offset in local_tz.offsets() {
 			let o = (offset / 900) + 48;
 			if o < 0 || o > 104 || TIMEZONE_OFFSET[o as usize] == 0xff {
-				return Err(Error::UnsupportedTimezoneOffset(offset));
+				return Err(MessageError::UnsupportedTimezoneOffset(offset));
 			}
 		}
 		Ok(Junghans { local_tz })
@@ -592,12 +604,15 @@ impl MessageGenerator for Junghans {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if `time.sec + 15 < 0`.
+	/// Returns [`MessageError::UnsupportedTime`] if `time.sec + 15 < 0`.
 	///
 	/// # Examples
 	///
 	/// ```
-	/// let j = Junghans::new(...).unwrap();
+	/// # use signals::junghans::Junghans;
+	/// # use signals::MessageGenerator;
+	/// # use time::TimeSpec;
+	/// let j = Junghans::new(None).unwrap();
 	/// // Sun, May 26, 2024. 16:58:10 UTC.
 	/// let mut time = TimeSpec {
 	/// 	sec: 1716742690,
@@ -618,7 +633,7 @@ impl MessageGenerator for Junghans {
 	/// assert_eq!(time.sec, 1716742720);
 	/// assert_eq!(time.nsec, 0);
 	/// ```
-	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, MessageError> {
 		let mut total_time: i64 = 15000000000;
 		let mut sec = time.sec + 15;
 
@@ -672,7 +687,7 @@ impl WriterState {
 	/// [`WriterState::End`] state.
 	///
 	/// The state machine also modifies `message` directly, consuming it as progress is made.
-	fn advance(&mut self, message: &mut Message, timing_total: usize) {
+	fn advance(&mut self, message: &mut Message, timing_total: u64) {
 		*self = match *self {
 			WriterState::Start(_) => WriterState::Bit(0, message.packed & 1 > 0),
 			WriterState::Bit(bit, _) => {
@@ -685,7 +700,7 @@ impl WriterState {
 			}
 			WriterState::End => {
 				message.delay -= timing_total as i64;
-				if message.delay < 1000 {
+				if message.delay <= 0 {
 					WriterState::Start(false)
 				} else {
 					WriterState::End
@@ -695,7 +710,7 @@ impl WriterState {
 	}
 }
 
-/// Make a writer to transmit Junghans messages sampled at 48 kHz.
+/// Make a writer to transmit Junghans messages sampled at `S` Hz.
 ///
 /// Returns a closure with state initialized to begin transmitting a sequence of messages. The
 /// closure takes two inputs:
@@ -714,29 +729,29 @@ impl WriterState {
 /// transmitted simply by calling with a new message.
 ///
 /// The returned closure operates in sample space rather than absolute time, meaning all time
-/// increments are 1/48,000 of a second or 20.833 microseconds. This also means that values
-/// returned from [`Junghans::get_message`] in `Message::delay` must be converted from nanoseconds
-/// to samples, e.g. with `(message.delay * 48) / 1000000`.
+/// increments are `1/S` seconds.
 ///
 /// *Note: this writer actually writes messages with a 13.33 kHz carrier, so the true 40 kHz
 /// carrier signal is the third harmonic of the output. This is because a 40 kHz signal cannot be
-/// adequately sampled at 48 kHz.*
+/// adequately sampled at common audio frequencies.*
 ///
 /// # Examples
 ///
 /// ```
+/// # use signals::junghans::{Junghans, make_writer};
+/// # use signals::MessageGenerator;
 /// // Construct a Junghans object to generate messages
 /// let j = Junghans::new(
-/// 			crate::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+/// 			time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 /// 		).expect("Invalid timezone offset");
 ///
 /// // Get a message for the current time
-/// let mut m = j.get_message(&mut crate::time::currenttime().unwrap()).expect("Time must be >=0");
+/// let m = j.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 /// // Convert from absolute time to sample time
-/// m.delay = (m.delay * 48) / 1000000;
+/// let mut s = m.sample::<48000>();
 ///
 /// // Make a writer that converts the message into wire format at 48 kHz
-/// let mut writer = make_writer();
+/// let mut writer = make_writer::<48000>();
 /// // Create a buffer to write 21.33ms of signal at a time
 /// let mut buf = Vec::<f32>::with_capacity(1024);
 /// unsafe {
@@ -746,49 +761,50 @@ impl WriterState {
 ///
 /// loop {
 /// 	// Write the message to the buffer
-/// 	let (_i, done) = writer(&mut m, buf);
+/// 	let (_i, done) = writer(&mut s, buf);
 ///
 /// 	// Use the results in buf
 ///
 /// 	if done { break; }
 /// };
 /// ```
-pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
-	let mut i: usize = 0;
-	let mut bitstart: usize = 0;
+pub fn make_writer<const S: u64>() -> impl FnMut(&mut SampledMessage<S>, &mut [f32]) -> (usize, bool) {
+	let mut i: u64 = 0;
+	let mut bitstart: u64 = 0;
 	let mut state = WriterState::Start(true);
-	move |message: &mut Message, data: &mut [f32]| -> (usize, bool) {
+	move |message: &mut SampledMessage<S>, data: &mut [f32]| -> (usize, bool) {
+		let message = &mut message.0;
 		let start = i;
 		let mut message_completed = false;
 		for sample in data.iter_mut() {
 			let (timing_on, timing_total) = match state {
 				WriterState::Start(first) => {
 					if first {
-						(5760 + message.delay as usize, 19200 + message.delay as usize) // (>=120ms, >=400ms)
+						((S*12/100) + message.delay as u64, (S*4/10) + message.delay as u64) // (>=120ms, >=400ms)
 					} else {
-						(5760, 19200) // (120ms, 400ms)
+						(S*12/100, S*4/10) // (120ms, 400ms)
 					}
 				}
 				WriterState::Bit(_, val) => {
 					if val {
-						(4320, 14400) // (90ms, 300ms)
+						(S*9/100, S*3/10) // (90ms, 300ms)
 					} else {
-						(2880, 9600) // (60ms, 200ms)
+						(S*6/100, S*2/10) // (60ms, 200ms)
 					}
 				}
 				WriterState::End => {
-					if message.delay > 15000 {
-						(2880, 9600) // (60ms, 200ms)
+					if message.delay > (S*3/10) as i64 {
+						(S*6/100, S*2/10) // (60ms, 200ms)
 					} else {
-						(4320, 14400) // (90ms, 300ms)
+						(S*9/100, S*3/10) // (90ms, 300ms)
 					}
 				}
 			};
 
 			let power = if i < bitstart + timing_on { 1.0 } else { 0.1 };
 
-			let pos = (i % 48000) as f32 / 48000.;
-			*sample = power * f32::sin(std::f32::consts::PI * 2. * 40000. / 3. * pos);
+			let pos = (i % S) as f32 / S as f32;
+			*sample = power * sin32(PI * 2. * 40000. / 3. * pos);
 			i += 1;
 
 			if i >= bitstart + timing_total {
@@ -802,22 +818,24 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 			}
 		}
 
-		(i - start, message_completed)
+		((i - start) as usize, message_completed)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	extern crate std;
+	use std::{eprintln, vec::Vec};
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").unwrap()
+		tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap()
 	}
 
 	#[test]
 	fn timezone_test() {
-		assert_eq!(Junghans::new(time::tz::parse_tzstring("ABC9:20".as_bytes()).ok()),
-				   Err(Error::UnsupportedTimezoneOffset(-33600)));
+		assert_eq!(Junghans::new(tz::parse_tzstring("ABC9:20".as_bytes()).ok()),
+				   Err(MessageError::UnsupportedTimezoneOffset(-33600)));
 	}
 
 	#[test]
@@ -872,10 +890,8 @@ mod tests {
 		assert_eq!(time.nsec, 0);
 	}
 
-	fn get_message(j: &Junghans, time: &mut TimeSpec) -> Message {
-		let mut message = j.get_message(time).unwrap();
-		message.delay = (message.delay * 48) / 1000000;
-		message
+	fn get_message(j: &Junghans, time: &mut TimeSpec) -> SampledMessage<48000> {
+		j.get_message(time).unwrap().sample()
 	}
 
 	fn calculate_power(buffer: &[f32]) -> f32 {
@@ -923,7 +939,7 @@ mod tests {
 
 		let mut message = get_message(&j, &mut time);
 		assert_eq!(writer(&mut message, buf), (714074, true));
-		let mut bound = message.delay as usize + 5760;
+		let mut bound = message.0.delay as usize + 5760;
 		check_is_high(&buf[0..bound]);
 		check_is_low(&buf[bound..bound + 13440]);
 		bound += 13440;
@@ -1003,17 +1019,17 @@ mod tests {
 		// Construct a Junghans object to generate messages
 		let j = Junghans::new(
 					// Timezone is used to configure the watch's local time
-					time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+					tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 				).expect("Invalid timezone offset");
 
 		// Get a message for the current time
 		let m = j.get_message(&mut time::now().unwrap());
 		match m {
-			Ok(mut m) => {
-				// Convert real time (nanoseconds) to sample time (48 kHz)
-				m.delay = (m.delay * 48) / 1000000;
+			Ok(m) => {
 				// Make a writer that converts the message into wire format at 48 kHz
-				let mut writer = make_writer();
+				let mut writer = make_writer::<48000>();
+				// Convert real time (nanoseconds) to sample time (48 kHz)
+				let mut s = m.sample();
 				// Create a buffer with enough space to hold the entire 15s encoded message
 				let mut buf = Vec::<f32>::with_capacity(800000);
 				unsafe {
@@ -1021,7 +1037,7 @@ mod tests {
 				}
 				let buf = buf.as_mut_slice();
 				// Write the message to the buffer
-				writer(&mut m, buf);
+				writer(&mut s, buf);
 
 				// Use the results in buf
 			},
@@ -1054,7 +1070,7 @@ mod tests {
 
 		// Documentation for Junghans::new
 		let j = Junghans::new(
-			time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+			tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 		);
 		match j {
 			Ok(_j) => {
@@ -1063,7 +1079,7 @@ mod tests {
 			Err(_) => {
 				// Known valid offset (UTC-8 / UTC-7) that cannot fail
 				let _j = Junghans::new(
-					time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+					tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
 				).unwrap();
 				// Create & use messages
 			}
@@ -1072,15 +1088,15 @@ mod tests {
 		// Documentation for make_writer
 		// Construct a Junghans object to generate messages
 		let j = Junghans::new(
-					time::tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
+					tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok()
 				).expect("Invalid timezone offset");
 
 		// Get a message for the current time
-		let mut m = j.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
+		let m = j.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 		// Convert from absolute time to sample time
-		m.delay = (m.delay * 48) / 1000000;
+		let mut s = m.sample();
 		// Make a writer that converts the message into wire format at 48 kHz
-		let mut writer = make_writer();
+		let mut writer = make_writer::<48000>();
 		// Create a buffer to write 21.33ms of signal at a time
 		let mut buf = Vec::<f32>::with_capacity(1024);
 		unsafe {
@@ -1090,7 +1106,7 @@ mod tests {
 
 		loop {
 			// Write the message to the buffer
-			let (_i, done) = writer(&mut m, buf);
+			let (_i, done) = writer(&mut s, buf);
 
 			// Use the results in buf
 

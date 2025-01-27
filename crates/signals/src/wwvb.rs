@@ -13,28 +13,30 @@
 //!
 //! # Examples
 //! ```
+//! # use signals::{wwvb, MessageGenerator};
+//! # use time;
 //! // Construct a WWVB object to generate messages
-//! let d = WWVB::new(None).unwrap();
+//! let d = wwvb::new(None).expect("Error reading default timezone");
 //!
 //! // Get a message for the current time
-//! let m = d.get_message(&mut crate::time::currenttime().unwrap());
+//! let m = d.get_message(&mut time::now().unwrap());
 //! match m {
-//! 	Ok(mut m) => {
-//! 		// Convert real time (nanoseconds) to sample time (48 kHz)
-//! 		m.delay = (m.delay * 48) / 1000000;
+//! 	Ok(m) => {
 //! 		// Make a writer that converts the message into wire format at 48 kHz
-//! 		let mut writer = make_writer();
+//! 		let mut writer = wwvb::make_writer::<48000>();
+//! 		// Sample the message at 48 kHz
+//! 		let mut s = m.sample::<48000>();
 //! 		// Create a buffer with enough space to hold 15s of the encoded message
-//! 		let mut buf = Vec::<f32>::with_capacity(800000);
+//! 		let mut buf = Vec::<f32>::with_capacity(720000);
 //! 		unsafe {
-//! 			buf.set_len(800000);
+//! 			buf.set_len(720000);
 //! 		}
 //! 		let buf = buf.as_mut_slice();
 //!
 //! 		// Write the 60s message in four 15s chunks
 //! 		for _ in 0..4 {
 //! 			// Write the message to the buffer
-//! 			writer(&mut m, buf);
+//! 			writer(&mut s, buf);
 //!
 //! 			// Use the results in buf
 //! 		}
@@ -48,9 +50,9 @@
 
 use time::{minute_of_century_from_timestamp, nextleapsecond, wday_from_ymd, Seconds, TimeSpec, Tm};
 use time::tz::{self, Timezone, TzDateRule};
-use crate::{Message, MessageGenerator};
-pub use crate::error::MessageError as Error;
-use std::f32::consts::PI;
+use crate::{Message, MessageError, MessageGenerator, SampledMessage};
+use core::f32::consts::PI;
+use crate::sin32;
 
 /// All known UT1-UTC offsets.
 ///
@@ -101,7 +103,7 @@ const DUT1: [(i64, u8); 112] = [
 /// 4. DST in effect and not changing in the next 24 hours.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// // Wed, Jul 04 2012 17:30:18 UTC
 /// let time = 1341423018;
 /// // US western time zone
@@ -144,7 +146,7 @@ const DST_LEAP_ENCODING: [u8; 8] = [0x10, 0x25, 0x26, 0x03,
 /// transition times per Sunday (1am, 2am, 3am).
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0/3,M11.1.0").unwrap();
 /// // 2rd Sunday of March; 3am
 /// assert_eq!(next_dst(2024, false, &timezone), 0x20);
@@ -164,7 +166,7 @@ const NEXT_DST_SPRING: [u8; 24] = [0x31, 0x2A, 0x04,  // 1st Sunday of March; 1a
 /// in November, and three transition times per Sunday (1am, 2am, 3am).
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
 /// // 1st Sunday of November, 2am
 /// assert_eq!(next_dst(2024, true, &timezone), 0x1B);
@@ -194,7 +196,7 @@ const NEXT_DST_FALL: [u8; 24] = [0x37, 0x0D, 0x32,  // 4th Sunday before N1; 1am
 /// https://www.nist.gov/system/files/documents/2017/05/09/NIST-Enhanced-WWVB-Broadcast-Format-1_01-2013-11-06.pdf
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// let mut timezone = tz::parse_tzstring(b"PST8").unwrap();
 /// assert_eq!(next_dst(2024, false, &timezone), 0x07);
 ///
@@ -274,7 +276,7 @@ fn next_dst(year: u16, isdst: bool, timezone: &Timezone) -> u8 {
 /// using the packed message, which can be transmitted to a watch.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// // US Pacific timezone, UTC-8 (standard time) / UTC-7 (daylight savings time)
 /// let timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
 ///
@@ -346,9 +348,9 @@ impl MessageUncompressed {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if `time < 0`.
-	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, Error> {
-		let utc = Tm::new(time).ok_or(Error::UnsupportedTime(time))?;
+	/// Returns [`MessageError::UnsupportedTime`] if `time < 0`.
+	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, MessageError> {
+		let utc = Tm::new(time).ok_or(MessageError::UnsupportedTime(time))?;
 		let start_of_utc_day = time - utc.hour as i64 * 3600 - utc.min as i64 * 60 - utc.sec as i64;
 		let next_utc_day = start_of_utc_day + 86400;  // 24 hours
 		let dst_today = timezone.info(start_of_utc_day).isdst;
@@ -362,11 +364,12 @@ impl MessageUncompressed {
 			None    => 0x0
 		};
 
-		let t = match DUT1.binary_search_by_key(&time, |&(t, _)| t) {
-			Ok(t) => t,
-			Err(t) => t.wrapping_sub(1),
-		};
-		let dut1 = DUT1.get(t).map(|&(_, d)| d).unwrap_or(0xA0);
+		let dut1 = (|| {
+			for &(t, d) in DUT1.iter().rev() {
+				if t <= time { return d }
+			}
+			0x0A
+		})();
 
 		Ok(MessageUncompressed {
 			utc_min_ones: utc.min % 10,
@@ -448,11 +451,13 @@ impl MessageUncompressed {
 /// # Examples
 ///
 /// ```
+/// # use signals::wwvb::WWVB;
+/// # use signals::MessageGenerator;
 /// // Construct a WWVB object to generate messages
 /// let d = WWVB::new(None).expect("Error getting NYC timezone data");
 ///
 /// // Get a message for the current time
-/// let m = d.get_message(&mut crate::time::currenttime().unwrap());
+/// let m = d.get_message(&mut time::now().unwrap());
 /// match m {
 /// 	Ok(mut m) => {
 /// 		// Use the message
@@ -471,24 +476,25 @@ pub struct WWVB {
 ///
 /// This is a convenience function, see [`WWVB::new`] for details.
 #[inline(always)]
-pub fn new(timezone: Option<Timezone>) -> Result<WWVB, Error> {
+pub fn new(timezone: Option<Timezone>) -> Result<WWVB, MessageError> {
 	WWVB::new(timezone)
 }
 
 impl WWVB {
 	/// Construct a new WWVB object.
 	///
-	/// If the input `timezone` is `None`, this function defaults to reading
-	/// `/usr/share/zoneinfo/America/New_York` for timezone information.
+	/// If the input `timezone` is `None`, this function defaults to `EST5EDT,M3.2.0,M11.1.0` or
+	/// reading `/usr/share/zoneinfo/America/New_York` (feature `std`) for timezone information.
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::TimezoneError`] if there was an error reading
+	/// Returns [`MessageError::TimezoneError`] if there was an error reading
 	/// `/usr/share/zoneinfo/America/New_York`.
 	///
 	/// # Examples
 	///
 	/// ```
+	/// # use signals::wwvb::WWVB;
 	/// let d = WWVB::new(None);
 	/// match d {
 	/// 	Ok(_d) => {
@@ -497,18 +503,23 @@ impl WWVB {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC-5 / UTC-4) that cannot fail
 	/// 		let _d = WWVB::new(
-	/// 			crate::tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").ok()
+	/// 			time::tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").ok()
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
 	/// }
 	/// ```
-	pub fn new(timezone: Option<Timezone>) -> Result<WWVB, Error> {
+	pub fn new(timezone: Option<Timezone>) -> Result<WWVB, MessageError> {
 		match timezone {
 			Some(t) => Ok(WWVB { ny_tz: t }),
+			#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 			None => tz::parse_file("/usr/share/zoneinfo/America/New_York")
 						.map(|t| WWVB { ny_tz: t })
-						.map_err(|e| Error::TimezoneError(e))
+						.map_err(|e| MessageError::TimezoneError(e)),
+			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
+			None => tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0")
+						.map(|t| WWVB { ny_tz: t })
+						.map_err(|e| MessageError::TimezoneError(e))
 		}
 	}
 }
@@ -530,11 +541,15 @@ impl MessageGenerator for WWVB {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if the minute that includes `time` is less than zero.
+	/// Returns [`MessageError::UnsupportedTime`] if the minute that includes `time` is less than
+	/// zero.
 	///
 	/// # Examples
 	///
 	/// ```
+	/// # use signals::wwvb::WWVB;
+	/// # use signals::MessageGenerator;
+	/// # use time::TimeSpec;
 	/// let wwvb = WWVB::new(None).unwrap();
 	/// // Sun, May 26, 2024. 16:57:25 UTC.
 	/// let mut time = TimeSpec {
@@ -560,7 +575,7 @@ impl MessageGenerator for WWVB {
 	/// assert_eq!(message.delay, 0);
 	/// assert_eq!(message.leap, false);
 	/// ```
-	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, MessageError> {
 		// Find the start of this minute (exactly)
 		let time_in_min = time.sec % 60;
 		let sec = time.sec - time_in_min;
@@ -662,7 +677,7 @@ impl WriterState {
 	}
 }
 
-/// Make a writer to transmit WWVB messages sampled at 48 kHz.
+/// Make a writer to transmit WWVB messages sampled at `S` Hz.
 ///
 /// Returns a closure with state initialized to begin transmitting a sequence of messages. The
 /// closure takes two inputs:
@@ -679,26 +694,26 @@ impl WriterState {
 /// transmitted simply by calling with a new message.
 ///
 /// The returned closure operates in sample space rather than absolute time, meaning all time
-/// increments are 1/48,000 of a second or 20.833 microseconds. This also means that values
-/// returned from [`WWVB::get_message`] in `Message::delay` must be converted from nanoseconds
-/// to samples, e.g. with `(message.delay * 48) / 1000000`.
+/// increments are `1/S` seconds.
 ///
 /// *Note: this writer actually writes messages with a 20 kHz carrier, so the true 60 kHz carrier
 /// signal is the third harmonic of the output. This is because a 60 kHz signal cannot be
-/// adequately sampled at 48 kHz.*
+/// adequately sampled at common audio output frequencies.*
 ///
 /// # Examples
 ///
 /// ```
+/// # use signals::wwvb::{WWVB, make_writer};
+/// # use signals::MessageGenerator;
 /// // Construct a WWVB object to generate messages
 /// let d = WWVB::new(None).expect("Error reading New York timezone");
 ///
 /// // Get a message for the current time
-/// let mut m = d.get_message(&mut crate::time::currenttime().unwrap()).expect("Time must be >=0");
+/// let m = d.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 /// // Convert from absolute time to sample time
-/// m.delay = (m.delay * 48) / 1000000;
+/// let mut s = m.sample::<48000>();
 /// // Make a writer that converts the message into wire format at 48 kHz
-/// let mut writer = make_writer();
+/// let mut writer = make_writer::<48000>();
 /// // Create a buffer to write 21.33ms of signal at a time
 /// let mut buf = Vec::<f32>::with_capacity(1024);
 /// unsafe {
@@ -708,21 +723,23 @@ impl WriterState {
 ///
 /// loop {
 /// 	// Write the message to the buffer
-/// 	let (_i, done) = writer(&mut m, buf);
+/// 	let (_i, done) = writer(&mut s, buf);
 /// 	// Use the results in buf
 /// 	if done { break; }
 /// };
 /// ```
-pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
-	let mut i: usize = 0;
-	let mut bitstart: usize = 0;
+pub fn make_writer<const S: u64>() -> impl FnMut(&mut SampledMessage<S>, &mut [f32]) -> (usize, bool) {
+	let mut i: u64 = 0;
+	let mut bitstart: u64 = 0;
 	let mut state = WriterState::Start;
-	move |message: &mut Message, data: &mut [f32]| -> (usize, bool) {
+	move |message: &mut SampledMessage<S>, data: &mut [f32]| -> (usize, bool) {
+		let message = &mut message.0;
+
 		// Move to the right bit position if we're starting mid-message
 		if message.delay > 0 {
-			let m = message.delay as usize;
-			let bit = m / 48000; // 1 bit per second
-			bitstart = i + (bit * 48000);
+			let m = message.delay as u64;
+			let bit = m / S; // 1 bit per second
+			bitstart = i + (bit * S);
 			i += m;
 			message.delay = 0;
 			state.advance_to(message, bit as u8);
@@ -731,17 +748,17 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 		}
 
 		// Sample time when phase the modulated signal starts and the message ends.
-		let timings = |x| (x + 4800, x + 48000); // (100ms, 1000ms)
+		let timings = |x| (x + S / 10, x + S); // (100ms, 1000ms)
 
 		let start = i;
 		let (mut phase_start, mut bitend) = timings(bitstart);
 		let mut message_completed = false;
 		for sample in data.iter_mut() {
 			let (timing_on, phase) = match state {
-				WriterState::Bit(_, AMBit::Marker, pm) => (38400, pm), // 800ms
-				WriterState::Bit(_, AMBit::Value(true), pm) => (24000, pm), // 500ms
-				WriterState::Bit(_, AMBit::Value(false), pm) => (9600, pm), // 200ms
-				WriterState::Leap  => (38400, false), // 800ms
+				WriterState::Bit(_, AMBit::Marker, pm) => (S*8/10, pm), // 800ms
+				WriterState::Bit(_, AMBit::Value(true), pm) => (S*5/10, pm), // 500ms
+				WriterState::Bit(_, AMBit::Value(false), pm) => (S*2/10, pm), // 200ms
+				WriterState::Leap  => (S*8/10, false), // 800ms
 				_ => (0, false),
 			};
 
@@ -759,8 +776,8 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 				1.0
 			};
 
-			let pos = (i % 48000) as f32 / 48000.;
-			*sample = power * phase_sign * f32::sin(PI * 2. * 60000. / 3. * pos);
+			let pos = (i % S) as f32 / S as f32;
+			*sample = power * phase_sign * sin32(PI * 2. * 60000. / 3. * pos);
 			i += 1;
 
 			if i >= bitend {
@@ -774,12 +791,14 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 			}
 		}
 
-		(i - start, message_completed)
+		((i - start) as usize, message_completed)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	extern crate std;
+	use std::vec::Vec;
 	use time::tz;
 	use super::*;
 
@@ -890,10 +909,8 @@ mod tests {
 		assert_eq!(message.leap, false);
 	}
 
-	fn get_message(j: &WWVB, time: &mut TimeSpec) -> Message {
-		let mut message = j.get_message(time).unwrap();
-		message.delay = (message.delay * 48) / 1000000;
-		message
+	fn get_message(j: &WWVB, time: &mut TimeSpec) -> SampledMessage<48000> {
+		j.get_message(time).unwrap().sample()
 	}
 
 	fn calculate_power(buffer: &[f32]) -> f32 {
@@ -965,8 +982,8 @@ mod tests {
 		let buf = buf.as_mut_slice();
 
 		let mut message = get_message(&wwvb, &mut time);
-		assert_eq!(message.packed.reverse_bits(), 0x5384C121CA011160);
-		let offset = message.delay as usize;
+		assert_eq!(message.0.packed.reverse_bits(), 0x5384C121CA011160);
+		let offset = message.0.delay as usize;
 		assert_eq!(writer(&mut message, buf).0, 1674075);
 		check_is_low(&buf[0..3674]);
 		check_is_high(&buf[3674..42075]);
@@ -1003,7 +1020,7 @@ mod tests {
 			packed >>= 1;
 		}
 
-		message = wwvb.get_message(&mut time).unwrap();
+		message = get_message(&wwvb, &mut time);
 		assert_eq!(writer(&mut message, buf).0, 2880000);
 		let mut packed = 0x5404C121CA011160_u64.reverse_bits() >> 1;
 		check_is_marker(buf, 0);
@@ -1039,38 +1056,6 @@ mod tests {
 
 	#[test]
 	fn module_doctest() {
-		// Construct a WWVB object to generate messages
-		let d = WWVB::new(None).unwrap();
-
-		// Get a message for the current time
-		let m = d.get_message(&mut time::now().unwrap());
-		match m {
-			Ok(mut m) => {
-				// Convert real time (nanoseconds) to sample time (48 kHz)
-				m.delay = (m.delay * 48) / 1000000;
-				// Make a writer that converts the message into wire format at 48 kHz
-				let mut writer = make_writer();
-				// Create a buffer with enough space to hold 15s of the encoded message
-				let mut buf = Vec::<f32>::with_capacity(800000);
-				unsafe {
-					buf.set_len(800000);
-				}
-				let buf = buf.as_mut_slice();
-
-				// Write the 60s message in four 15s chunks
-				for _ in 0..4 {
-					// Write the message to the buffer
-					writer(&mut m, buf);
-
-					// Use the results in buf
-				}
-			},
-			Err(e) => {
-				// Errors only occur if the input time is before the Unix epoch (Jan 1, 1970)
-				eprintln!("{}", e);
-			}
-		}
-
 		// Documentation for DST_LEAP_ENCODING
 		// Wed, Jul 04 2012 17:30:18 UTC
 		let time = 1341423018;

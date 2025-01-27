@@ -54,17 +54,12 @@ pub const LEAPSECONDS: [(i64, u8); 28] = [(63072000,   10), (78796800,   11), (9
 /// assert_eq!(nextleapsecond(525323527), Some((567993600,  24)));
 /// ```
 pub fn nextleapsecond(time: i64) -> Option<(i64, u8)> {
-	// Common case
-	if time > 1483228800 {
-		return None
+	let mut last = None;
+	for t in LEAPSECONDS.iter().rev() {
+		if t.0 < time { break }
+		last = Some(*t);
 	}
-
-	let t = match LEAPSECONDS.binary_search_by_key(&time, |&(t, _)| t) {
-		Ok(t) => t,
-		Err(t) => t
-	};
-
-	LEAPSECONDS.get(t).copied()
+	last
 }
 
 /// Helper type to support math on [`TimeSpec`]s. Represents seconds.

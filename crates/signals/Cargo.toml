@@ -1,0 +1,14 @@
+[package]
+name = "signals"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/jensyt/timesignal"
+
+[dependencies]
+time = { path = "../time" }
+
+[dev-dependencies]
+time = { path = "../time", features = ["std", "now"] }
+
+[features]
+std = ["time/std"]

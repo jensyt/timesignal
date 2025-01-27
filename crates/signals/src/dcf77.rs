@@ -5,29 +5,32 @@
 //! # Examples
 //!
 //! ```
+//! # use signals::dcf77::{DCF77, make_writer};
+//! # use signals::MessageGenerator;
 //! // Construct a DCF77 object to generate messages
 //! let d = DCF77::new(None).unwrap();
 //!
 //! // Get a message for the current time
-//! let m = d.get_message(&mut crate::time::currenttime().unwrap());
+//! let m = d.get_message(&mut time::now().unwrap());
 //! match m {
-//! 	Ok(mut m) => {
-//! 		// Convert real time (nanoseconds) to sample time (48 kHz)
-//! 		m.delay = (m.delay * 48) / 1000000;
-//!
+//! 	Ok(m) => {
 //! 		// Make a writer that converts the message into wire format at 48 kHz
-//! 		let mut writer = make_writer();
+//! 		let mut writer = make_writer::<48000>();
+//!
+//! 		// Convert real time (nanoseconds) to sample time (48 kHz)
+//! 		let mut s = m.sample();
+//!
 //! 		// Create a buffer with enough space to hold 15s of the encoded message
-//! 		let mut buf = Vec::<f32>::with_capacity(800000);
+//! 		let mut buf = Vec::<f32>::with_capacity(720000);
 //! 		unsafe {
-//! 			buf.set_len(800000);
+//! 			buf.set_len(720000);
 //! 		}
 //! 		let buf = buf.as_mut_slice();
 //!
 //! 		// Write the 60s message in four 15s chunks
 //! 		for _ in 0..4 {
 //! 			// Write the message to the buffer
-//! 			writer(&mut m, buf);
+//! 			writer(&mut s, buf);
 //!
 //! 			// Use the results in buf
 //! 		}
@@ -39,10 +42,10 @@
 //! }
 //! ```
 
-use std::f32::consts::PI;
+use core::f32::consts::PI;
 use time::{nextleapsecond, Seconds, TimeSpec, tz::{self, Timezone}};
-use crate::{Message, MessageGenerator};
-pub use crate::error::MessageError as Error;
+use crate::{Message, MessageError, MessageGenerator, SampledMessage};
+use crate::sin32;
 
 /// Pseudorandom chip sequence for phase modulated signal.
 ///
@@ -51,7 +54,7 @@ pub use crate::error::MessageError as Error;
 /// zero or one.
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// let bit = 1;
 /// for chip in PM_CHIP_SEQUENCE {
 /// 	let _phase = PI / 180. * if bit ^ chip == 1 {
@@ -73,9 +76,9 @@ const PM_CHIP_SEQUENCE: &[u8; 512] = include_bytes!("../assets/dcf77_chip_sequen
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// // Berlin (CET/CEST) timezone, UTC+1 (standard time) / UTC+2 (daylight savings time)
-/// let timezone = crate::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").ok();
+/// let timezone = time::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").ok();
 ///
 /// // Sunday, May 26, 2024. 18:58:25 UTC+2 / 16:58:25 UTC.
 /// let m = MessageUncompressed::new(1716742705, &timezone).unwrap();
@@ -136,9 +139,9 @@ impl MessageUncompressed {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if `time < 0`.
-	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, Error> {
-		let date = timezone.date(time).ok_or(Error::UnsupportedTime(time))?;
+	/// Returns [`MessageError::UnsupportedTime`] if `time < 0`.
+	fn new(time: i64, timezone: &Timezone) -> Result<MessageUncompressed, MessageError> {
+		let date = timezone.date(time).ok_or(MessageError::UnsupportedTime(time))?;
 
 		// Announcement bits are based on the prior minute
 		let tminus60 = time - 60;
@@ -216,13 +219,15 @@ impl MessageUncompressed {
 /// # Examples
 ///
 /// ```
+/// # use signals::dcf77::DCF77;
+/// # use signals::MessageGenerator;
 /// // Construct a DCF77 object to generate messages
 /// let d = DCF77::new(None).expect("Error getting Berlin timezone data");
 ///
 /// // Get a message for the current time
-/// let m = d.get_message(&mut crate::time::currenttime().unwrap());
+/// let m = d.get_message(&mut time::now().unwrap());
 /// match m {
-/// 	Ok(mut m) => {
+/// 	Ok(_m) => {
 /// 		// Use the message
 /// 	},
 /// 	Err(e) => {
@@ -239,24 +244,25 @@ pub struct DCF77 {
 ///
 /// This is a convenience function, see [`DCF77::new`] for details.
 #[inline(always)]
-pub fn new(timezone: Option<Timezone>) -> Result<DCF77, Error> {
+pub fn new(timezone: Option<Timezone>) -> Result<DCF77, MessageError> {
 	DCF77::new(timezone)
 }
 
 impl DCF77 {
 	/// Construct a new DCF77 object.
 	///
-	/// If the input `timezone` is `None`, this function defaults to reading
-	/// `/usr/share/zoneinfo/Europe/Berlin` for timezone information.
+	/// If the input `timezone` is `None`, this function defaults to `CET-1CEST,M3.5.0,M10.5.0/3` or
+	/// reading `/usr/share/zoneinfo/Europe/Berlin` (feature `std`) for timezone information.
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::TimezoneError`] if there was an error reading
+	/// Returns [`MessageError::TimezoneError`] if there was an error reading
 	/// `/usr/share/zoneinfo/Europe/Berlin`.
 	///
 	/// # Examples
 	///
 	/// ```
+	/// # use signals::dcf77::DCF77;
 	/// let d = DCF77::new(None);
 	/// match d {
 	/// 	Ok(_d) => {
@@ -265,18 +271,23 @@ impl DCF77 {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC+1 / UTC+2) that cannot fail
 	/// 		let _d = DCF77::new(
-	/// 			crate::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
+	/// 			time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
 	/// }
 	/// ```
-	pub fn new(timezone: Option<Timezone>) -> Result<DCF77, Error> {
+	pub fn new(timezone: Option<Timezone>) -> Result<DCF77, MessageError> {
 		match timezone {
 			Some(t) => Ok(DCF77 { berlin_tz: t }),
+			#[cfg(all(not(target_arch = "wasm32"), feature = "std"))]
 			None => tz::parse_file("/usr/share/zoneinfo/Europe/Berlin")
 						.map(|t| DCF77 { berlin_tz: t })
-						.map_err(|e| Error::TimezoneError(e))
+						.map_err(|e| MessageError::TimezoneError(e)),
+			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
+			None => tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3")
+						.map(|t| DCF77 { berlin_tz: t })
+						.map_err(|e| MessageError::TimezoneError(e))
 		}
 	}
 }
@@ -298,11 +309,14 @@ impl MessageGenerator for DCF77 {
 	///
 	/// # Errors
 	///
-	/// Returns [`Error::UnsupportedTime`] if the minute **after** `time` is less than zero.
+	/// Returns [`MessageError::UnsupportedTime`] if the minute **after** `time` is less than zero.
 	///
 	/// # Examples
 	///
 	/// ```
+	/// # use signals::dcf77::DCF77;
+	/// # use signals::MessageGenerator;
+	/// # use time::TimeSpec;
 	/// let dcf77 = DCF77::new(None).unwrap();
 	/// // Sun, May 26, 2024. 16:57:25 UTC.
 	/// let mut time = TimeSpec {
@@ -328,7 +342,7 @@ impl MessageGenerator for DCF77 {
 	/// assert_eq!(message.delay, 0);
 	/// assert_eq!(message.leap, false);
 	/// ```
-	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, Error> {
+	fn get_message(&self, time: &mut TimeSpec) -> Result<Message, MessageError> {
 		// Find the next minute (exactly)
 		let time_in_min = time.sec % 60;
 		let sec = time.sec - time_in_min + 60;
@@ -414,7 +428,7 @@ impl WriterState {
 	}
 }
 
-/// Make a writer to transmit DCF77 messages sampled at 48 kHz.
+/// Make a writer to transmit DCF77 messages sampled at `S` Hz.
 ///
 /// Returns a closure with state initialized to begin transmitting a sequence of messages. The
 /// closure takes two inputs:
@@ -431,26 +445,26 @@ impl WriterState {
 /// transmitted simply by calling with a new message.
 ///
 /// The returned closure operates in sample space rather than absolute time, meaning all time
-/// increments are 1/48,000 of a second or 20.833 microseconds. This also means that values
-/// returned from [`DCF77::get_message`] in `Message::delay` must be converted from nanoseconds
-/// to samples, e.g. with `(message.delay * 48) / 1000000`.
+/// increments are `1/S` seconds.
 ///
 /// *Note: this writer actually writes messages with a 15.5 kHz carrier, so the true 77.5 kHz
 /// carrier signal is the fifth harmonic of the output. This is because a 77.5 kHz signal cannot be
-/// adequately sampled at 48 kHz.*
+/// adequately sampled at common audio output frequencies.*
 ///
 /// # Examples
 ///
 /// ```
+/// # use signals::dcf77::{DCF77, make_writer};
+/// # use signals::MessageGenerator;
 /// // Construct a DCF77 object to generate messages
 /// let d = DCF77::new(None).expect("Error reading Berlin timezone");
 ///
 /// // Get a message for the current time
-/// let mut m = d.get_message(&mut crate::time::currenttime().unwrap()).expect("Time must be >=0");
+/// let m = d.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
 /// // Convert from absolute time to sample time
-/// m.delay = (m.delay * 48) / 1000000;
+/// let mut s = m.sample::<48000>();
 /// // Make a writer that converts the message into wire format at 48 kHz
-/// let mut writer = make_writer();
+/// let mut writer = make_writer::<48000>();
 /// // Create a buffer to write 21.33ms of signal at a time
 /// let mut buf = Vec::<f32>::with_capacity(1024);
 /// unsafe {
@@ -460,21 +474,23 @@ impl WriterState {
 ///
 /// loop {
 /// 	// Write the message to the buffer
-/// 	let (_i, done) = writer(&mut m, buf);
+/// 	let (_i, done) = writer(&mut s, buf);
 /// 	// Use the results in buf
 /// 	if done { break; }
 /// };
 /// ```
-pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
-	let mut i: usize = 0;
-	let mut bitstart: usize = 0;
+pub fn make_writer<const S: u64>() -> impl FnMut(&mut SampledMessage<S>, &mut [f32]) -> (usize, bool) {
+	let mut i: u64 = 0;
+	let mut bitstart: u64 = 0;
 	let mut state = WriterState::Start;
-	move |message: &mut Message, data: &mut [f32]| -> (usize, bool) {
+	move |message: &mut SampledMessage<S>, data: &mut [f32]| -> (usize, bool) {
+		let message = &mut message.0;
+
 		// Move to the right bit position if we're starting mid-message
 		if message.delay > 0 {
-			let m = message.delay as usize;
-			let bit = m / 48000; // 1 bit per second
-			bitstart = i + (bit * 48000);
+			let m = message.delay as u64;
+			let bit = m / S; // 1 bit per second
+			bitstart = i + (bit * S);
 			i += m;
 			message.delay = 0;
 			state.advance_to(message, bit as u8);
@@ -484,16 +500,16 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 
 		// Sample time when phase the modulated signal starts, phase modulated signal ends, and the
 		// message ends.
-		let timings = |x| (x + 9600, x + 47653, x + 48000); // (200ms, ~993ms, 1000ms)
+		let timings = |x| (x + (S*2/10), x + (S*7694/7750), x + S); // (200ms, ~993ms, 1000ms)
 
 		let start = i;
 		let (mut phase_start, mut phase_end, mut bitend) = timings(bitstart);
 		let mut message_completed = false;
 		for sample in data.iter_mut() {
 			let (timing_on, phase) = match state {
-				WriterState::Bit(_, true, pm) => (9600, pm), // 200ms
-				WriterState::Bit(_, false, pm) => (4800, pm), // 100ms
-				WriterState::Leap  => (4800, false), // 100ms
+				WriterState::Bit(_, true, pm) => (S*2/10, pm), // 200ms
+				WriterState::Bit(_, false, pm) => (S/10, pm), // 100ms
+				WriterState::Leap  => (S/10, false), // 100ms
 				_ => (0, false),
 			};
 
@@ -507,8 +523,8 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 			// Calculate phase modulation
 			let phase_i = if i >= phase_start && i <= phase_end {
 				// Each chip spans 120 cycles of the 77.5 kHz carrier
-				let chip_i = (i - phase_start) * 77500 / (120 * 48000);
-				let chip = PM_CHIP_SEQUENCE.get(chip_i).copied().unwrap_or(0) > 0;
+				let chip_i = (i - phase_start) * 77500 / (120 * S);
+				let chip = PM_CHIP_SEQUENCE.get(chip_i as usize).copied().unwrap_or(0) > 0;
 				PI / 180. * if phase ^ chip {
 					-15.6
 				} else {
@@ -518,8 +534,8 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 				0.
 			};
 
-			let pos = (i % 48000) as f32 / 48000.;
-			*sample = power * f32::sin(PI * 2. * 77500. / 5. * pos + phase_i);
+			let pos = (i % S) as f32 / S as f32;
+			*sample = power * sin32(PI * 2. * 77500. / 5. * pos + phase_i);
 			i += 1;
 
 			if i >= bitend {
@@ -533,16 +549,18 @@ pub fn make_writer() -> impl FnMut(&mut Message, &mut [f32]) -> (usize, bool) {
 			}
 		}
 
-		(i - start, message_completed)
+		((i - start) as usize, message_completed)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	extern crate std;
+	use std::vec::Vec;
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		time::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").unwrap()
+		time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").unwrap()
 	}
 
 	#[test]
@@ -645,10 +663,8 @@ mod tests {
 		assert_eq!(message.leap, false);
 	}
 
-	fn get_message(j: &DCF77, time: &mut TimeSpec) -> Message {
-		let mut message = j.get_message(time).unwrap();
-		message.delay = (message.delay * 48) / 1000000;
-		message
+	fn get_message(j: &DCF77, time: &mut TimeSpec) -> SampledMessage<48000> {
+		j.get_message(time).unwrap().sample()
 	}
 
 	fn calculate_power(buffer: &[f32]) -> f32 {
@@ -737,7 +753,7 @@ mod tests {
 		let buf = buf.as_mut_slice();
 
 		let mut message = get_message(&dcf77, &mut time);
-		let offset = message.delay as usize;
+		let offset = message.0.delay as usize;
 		assert_eq!(writer(&mut message, buf).0, 1674075);
 		check_is_low(&buf[0..3674]);
 		check_is_high(&buf[3674..42075]);
@@ -781,7 +797,7 @@ mod tests {
 			packed >>= 1;
 		}
 
-		message = dcf77.get_message(&mut time).unwrap();
+		message = get_message(&dcf77, &mut time);
 		assert_eq!(writer(&mut message, buf).0, 2880000);
 		let mut bound = 0;
 		let mut packed = 0x90BE630B320000_u64;
@@ -818,39 +834,6 @@ mod tests {
 
 	#[test]
 	fn module_doctest() {
-		// Construct a DCF77 object to generate messages
-		let d = DCF77::new(None).unwrap();
-
-		// Get a message for the current time
-		let m = d.get_message(&mut time::now().unwrap());
-		match m {
-			Ok(mut m) => {
-				// Convert real time (nanoseconds) to sample time (48 kHz)
-				m.delay = (m.delay * 48) / 1000000;
-				// Make a writer that converts the message into wire format at 48 kHz
-				let mut writer = make_writer();
-				// Create a buffer with enough space to hold 15s of the encoded message
-				let mut buf = Vec::<f32>::with_capacity(800000);
-				unsafe {
-					buf.set_len(800000);
-				}
-				let buf = buf.as_mut_slice();
-
-				// Write the 60s message in four 15s chunks
-				for _ in 0..4 {
-					// Write the message to the buffer
-					writer(&mut m, buf);
-
-					// Use the results in buf
-				}
-			},
-			Err(e) => {
-				// Errors only occur if the input time is before the Unix epoch (Jan 1, 1970)
-				eprintln!("{}", e);
-			}
-		}
-
-
 		// Documentation for PM_CHIP_SEQUENCE
 		let bit = 1;
 		for chip in PM_CHIP_SEQUENCE {
@@ -862,7 +845,6 @@ mod tests {
 
 			// Use _phase to modulate carrier
 		}
-
 
 		// Documentation for DCF77::new
 		let d = DCF77::new(None);
@@ -878,32 +860,5 @@ mod tests {
 				// Create & use messages
 			}
 		}
-
-
-		// Documentation for make_writer
-		// Construct a DCF77 object to generate messages
-		let d = DCF77::new(None).expect("Error reading Berlin timezone");
-
-		// Get a message for the current time
-		let mut m = d.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
-		// Convert from absolute time to sample time
-		m.delay = (m.delay * 48) / 1000000;
-		// Make a writer that converts the message into wire format at 48 kHz
-		let mut writer = make_writer();
-		// Create a buffer to write 21.33ms of signal at a time
-		let mut buf = Vec::<f32>::with_capacity(1024);
-		unsafe {
-			buf.set_len(1024);
-		}
-		let buf = buf.as_mut_slice();
-
-		loop {
-			// Write the message to the buffer
-			let (_i, done) = writer(&mut m, buf);
-
-			// Use the results in buf
-
-			if done { break; }
-		};
 	}
 }

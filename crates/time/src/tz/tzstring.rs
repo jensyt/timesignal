@@ -13,13 +13,16 @@
 //! # Examples
 //!
 //! ```
-//! # use time::{time::Tm, tz::{parse_tzstring, TzInfo, TmWithTzInfo}};
-//! // Parsing a TZ string
+//! # use time::{time::Tm, tz::{parse_tzstring, parse_tzstring_const, TzInfo, TmWithTzInfo}};
+//! // Parsing a TZ string at runtime
 //! let timezone = parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
 //!
 //! // Getting info for a given unix timestamp
 //! let info = timezone.info(1723433665);
 //! assert_eq!(info, TzInfo { utoff: -14400, isdst: true });
+//!
+//! // Alternatively, use compile-time evaluation
+//! let timezone = parse_tzstring_const!(b"EST5EDT,M3.2.0,M11.1.0");
 //!
 //! // Getting the date for a given unix timestamp
 //! let date = timezone.date(1723433665);
@@ -29,9 +32,7 @@
 //! }));
 //! ```
 
-use core::{error, fmt, slice::SliceIndex};
-#[cfg(feature = "alloc")]
-use alloc::boxed::Box;
+use core::{error, fmt, ops::RangeFrom};
 use crate::time::{
 	days_per_month,
 	isleapyear,
@@ -40,11 +41,13 @@ use crate::time::{
 	wday_from_ymd,
 	y_from_timestamp
 };
-use super::{TzInfo, Timezone, get_or_default};
+use super::{get_first_or_default, Timezone, TzInfo};
 
 /// The error type for parsing timezone data (TZ strings).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum TzStringError {
+	/// Empty input.
+	MissingTzString,
 	/// Missing a required [`TzDateRule`].
 	MissingTzDateRule,
 	/// A date component of a [`TzDateRule`] was out of range.
@@ -62,6 +65,7 @@ pub enum TzStringError {
 impl fmt::Display for TzStringError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
+			TzStringError::MissingTzString => write!(f, "Missing TZ string"),
 			TzStringError::MissingTzDateRule => write!(f, "Missing TZ date rule"),
 			TzStringError::DateOutOfRange => write!(f, "Date component out of range"),
 			TzStringError::TimeOutOfRange => write!(f, "Time component out of range"),
@@ -74,11 +78,32 @@ impl fmt::Display for TzStringError {
 
 impl error::Error for TzStringError {}
 
+/// Get first byte, if valid, or return [`TzStringError::InvalidOrUnsupportedTzString`].
+#[inline(always)]
+const fn get_first_or_invalid(bytes: &[u8]) -> Result<u8, TzStringError> {
+	match bytes.first() {
+		Some(v) => Ok(*v),
+		None => Err(TzStringError::InvalidOrUnsupportedTzString)
+	}
+}
+
 /// Get a given index, if valid, or return [`TzStringError::InvalidOrUnsupportedTzString`].
 #[inline(always)]
-fn get_or_invalid<I>(bytes: &[u8], index: I) -> Result<&I::Output, TzStringError>
-where I: SliceIndex<[u8]> {
-	bytes.get(index).ok_or(TzStringError::InvalidOrUnsupportedTzString)
+const fn get_or_invalid_range(bytes: &[u8], index: RangeFrom<usize>) -> Result<&[u8], TzStringError> {
+	match bytes.split_at_checked(index.start) {
+		Some((_, v)) => Ok(v),
+		None => Err(TzStringError::InvalidOrUnsupportedTzString)
+	}
+}
+
+/// Emulate the ? operator in const functions
+macro_rules! throw {
+	($expr:expr) => {
+		match $expr {
+			Ok(v) => v,
+			Err(e) => return Err(e)
+		}
+	};
 }
 
 /// Parse an integer from a byte slice.
@@ -93,14 +118,18 @@ where I: SliceIndex<[u8]> {
 /// assert_eq!(parse_num(b"15x"), (15, 2));
 /// assert_eq!(parse_num(b"x15"), (0, 0));
 /// ```
-fn parse_num(bytes: &[u8]) -> (u32, usize) {
+const fn parse_num(bytes: &[u8]) -> (u32, usize) {
 	let mut i = 0;
 	let mut r: u32 = 0;
-	for b in bytes {
-		match *b {
+	let len = bytes.len();
+	while i < len {
+		match bytes[i] {
 			v @ b'0'..=b'9' => {
-				r = match r.checked_mul(10).and_then(|x| x.checked_add((v - b'0') as u32)) {
-					Some(v) => v,
+				r = match r.checked_mul(10) {
+					Some(x) => match x.checked_add((v - b'0') as u32) {
+						Some(v) => v,
+						None => return (u32::MAX, i)
+					},
 					None => return (u32::MAX, i)
 				};
 			}
@@ -162,7 +191,7 @@ impl TzDateRule {
 	/// assert_eq!(TzDateRule::parse(b"M12.5.asd"), Err(TzStringError::InvalidOrUnsupportedTzString));
 	/// assert_eq!(TzDateRule::parse(b"M13.5.6"), Err(TzStringError::DateOutOfRange));
 	/// ```
-	pub fn parse(bytes: &[u8]) -> Result<(TzDateRule, usize), TzStringError> {
+	pub const fn parse(bytes: &[u8]) -> Result<(TzDateRule, usize), TzStringError> {
 		if bytes.len() == 0 {
 			return Err(TzStringError::MissingTzDateRule)
 		}
@@ -171,7 +200,7 @@ impl TzDateRule {
 		match bytes[0] {
 			// Jn
 			b'J' => {
-				let (n, offset) = parse_num(get_or_invalid(bytes, 1..)?);
+				let (n, offset) = parse_num(throw!(get_or_invalid_range(bytes, 1..)));
 				if n == 0 || n > 365 {
 					Err(TzStringError::DateOutOfRange)
 				} else {
@@ -191,26 +220,31 @@ impl TzDateRule {
 			// Mm.w.d
 			b'M' => {
 				let mut total = 1;
-				let (m, offset) = parse_num(get_or_invalid(bytes, total..)?);
+				let (m, offset) = parse_num(throw!(get_or_invalid_range(bytes, total..)));
 				total += offset;
-				if offset == 0 || get_or_default(bytes, total) != b'.' {
+
+				let mut b = throw!(get_or_invalid_range(bytes, total..));
+				if offset == 0 || get_first_or_default(b) != b'.' {
 					Err(TzStringError::InvalidOrUnsupportedTzString)
 				} else if m < 1 || m > 12 {
 					Err(TzStringError::DateOutOfRange)
 				} else {
 					// Increment for the '.'
 					total += 1;
-					let (w, offset) = parse_num(get_or_invalid(bytes, total..)?);
+					let (w, offset) = parse_num(throw!(get_or_invalid_range(bytes, total..)));
 					total += offset;
-					if offset == 0 || get_or_default(bytes, total) != b'.' {
+
+					b = throw!(get_or_invalid_range(bytes, total..));
+					if offset == 0 || get_first_or_default(b) != b'.' {
 						Err(TzStringError::InvalidOrUnsupportedTzString)
 					} else if w < 1 || w > 5 {
 						Err(TzStringError::DateOutOfRange)
 					} else {
 						// Increment for the '.'
 						total += 1;
-						let (d, offset) = parse_num(get_or_invalid(bytes, total..)?);
+						let (d, offset) = parse_num(throw!(get_or_invalid_range(bytes, total..)));
 						total += offset;
+
 						if offset == 0 {
 							Err(TzStringError::InvalidOrUnsupportedTzString)
 						} else if d > 6 {
@@ -310,12 +344,10 @@ pub struct TzSpec {
 impl TzSpec {
 	/// Parse a TZ spec from a TZ string.
 	///
-	/// Note that if the input slice is empty (`bytes.len() == 0`) this function returns `Ok(None)`
-	/// rather than `Err(...)`.
-	///
 	/// # Errors
 	///
 	/// This function may return [`TzStringError`] in the following cases:
+	/// - `bytes.len() == 0`
 	/// - `bytes` is not a POSIX-compliant TZ string
 	/// - `bytes` uses an unsupported TZ string feature, for example names enclosed in '<...>'
 	/// - `bytes` contains data *after* the TZ string
@@ -324,13 +356,13 @@ impl TzSpec {
 	///
 	/// ```
 	/// # use time::tz::{TzSpec, TzDateRule, TzRule, TzStringError};
-	/// assert_eq!(TzSpec::parse(b""), Ok(None));
+	/// assert_eq!(TzSpec::parse(b""), Err(TzStringError::MissingTzString));
 	/// assert_eq!(TzSpec::parse(b"EST"), Err(TzStringError::InvalidOrUnsupportedTzString));
-	/// assert_eq!(TzSpec::parse(b"EST5"), Ok(Some(TzSpec {
+	/// assert_eq!(TzSpec::parse(b"EST5"), Ok(TzSpec {
 	/// 	utoff: -18000,
 	/// 	dst: None
-	/// })));
-	/// assert_eq!(TzSpec::parse(b"XXX4YYY,J1/0,J365/25"), Ok(Some(TzSpec {
+	/// }));
+	/// assert_eq!(TzSpec::parse(b"XXX4YYY,J1/0,J365/25"), Ok(TzSpec {
 	/// 	utoff: -14400,
 	/// 	dst: Some((
 	/// 		-10800,
@@ -339,8 +371,8 @@ impl TzSpec {
 	/// 			fromdst: (TzDateRule::J(365), 90000)
 	/// 		}
 	/// 	))
-	/// })));
-	/// assert_eq!(TzSpec::parse(b"XXX4:30YYY6:45,25/3:10:30,280/-1:20"), Ok(Some(TzSpec {
+	/// }));
+	/// assert_eq!(TzSpec::parse(b"XXX4:30YYY6:45,25/3:10:30,280/-1:20"), Ok(TzSpec {
 	/// 	utoff: -16200,
 	/// 	dst: Some((
 	/// 		-24300,
@@ -349,34 +381,34 @@ impl TzSpec {
 	/// 			fromdst: (TzDateRule::N(280), -4800)
 	/// 		}
 	/// 	))
-	/// })));
+	/// }));
 	/// ```
-	pub fn parse(mut bytes: &[u8]) -> Result<Option<TzSpec>, TzStringError> {
+	pub const fn parse(mut bytes: &[u8]) -> Result<TzSpec, TzStringError> {
 		if bytes.len() == 0 {
-			return Ok(None);
+			return Err(TzStringError::MissingTzString);
 		}
 
 		// Read the standard timezone name
-		let stdlen = bytes.iter().take_while(TzSpec::match_name).count();
+		let stdlen = TzSpec::match_name(bytes);
 		if stdlen == 0 {
 			return Err(TzStringError::InvalidOrUnsupportedTzString);
 		}
-		bytes = get_or_invalid(bytes, stdlen..)?;
+		bytes = throw!(get_or_invalid_range(bytes, stdlen..));
 
 		// Read the standard time UTC offset
-		let (utoff, offset) = TzSpec::parse_time(bytes, false)?;
-		bytes = get_or_invalid(bytes, offset..)?;
+		let (utoff, offset) = throw!(TzSpec::parse_time(bytes, false));
+		bytes = throw!(get_or_invalid_range(bytes, offset..));
 
 		// Read the optional DST timezone name
-		let dstlen = bytes.iter().take_while(TzSpec::match_name).count();
+		let dstlen = TzSpec::match_name(bytes);
 		let dst = if dstlen == 0 {
 			None
 		} else {
-			bytes = get_or_invalid(bytes, dstlen..)?;
+			bytes = throw!(get_or_invalid_range(bytes, dstlen..));
 
 			// Read the optional DST offset
 			let dstoff = if let Ok((tmpdstoff, offset)) = TzSpec::parse_time(bytes, false) {
-				bytes = get_or_invalid(bytes, offset..)?;
+				bytes = throw!(get_or_invalid_range(bytes, offset..));
 				tmpdstoff
 			} else {
 				// Default DST to 1 hour advancement. Subtract because TZ string offsets are subtracted
@@ -385,42 +417,42 @@ impl TzSpec {
 			};
 
 			// Read required comma, since there need to be rules for transitions if DST is defined
-			if get_or_default(bytes, 0) != b',' {
+			if get_first_or_default(bytes) != b',' {
 				return Err(TzStringError::MissingTzDateRule);
 			}
-			bytes = get_or_invalid(bytes, 1..)?;
+			bytes = throw!(get_or_invalid_range(bytes, 1..));
 
 			// Read the transition date rule for standard -> DST
-			let (todstdate, offset) = TzDateRule::parse(bytes)?;
-			bytes = get_or_invalid(bytes, offset..)?;
+			let (todstdate, offset) = throw!(TzDateRule::parse(bytes));
+			bytes = throw!(get_or_invalid_range(bytes, offset..));
 
 			// Read the optional transition time for standard -> DST, defaulting to 2am
-			let todsttime = match get_or_default(bytes, 0) {
+			let todsttime = match get_first_or_default(bytes) {
 				b'/' => {
-					bytes = get_or_invalid(bytes, 1..)?;
-					let (t, offset) = TzSpec::parse_time(bytes, true)?;
-					bytes = get_or_invalid(bytes, offset..)?;
+					bytes = throw!(get_or_invalid_range(bytes, 1..));
+					let (t, offset) = throw!(TzSpec::parse_time(bytes, true));
+					bytes = throw!(get_or_invalid_range(bytes, offset..));
 					t
 				}
 				_ => 7200
 			};
 
 			// Required comma to separate transition rules
-			if get_or_default(bytes, 0) != b',' {
+			if get_first_or_default(bytes) != b',' {
 				return Err(TzStringError::MissingTzDateRule);
 			}
-			bytes = get_or_invalid(bytes, 1..)?;
+			bytes = throw!(get_or_invalid_range(bytes, 1..));
 
 			// Read the transition date rule for DST -> standard
-			let (fromdstdate, offset) = TzDateRule::parse(bytes)?;
-			bytes = get_or_invalid(bytes, offset..)?;
+			let (fromdstdate, offset) = throw!(TzDateRule::parse(bytes));
+			bytes = throw!(get_or_invalid_range(bytes, offset..));
 
 			// Read the optional transition time for DST -> standard, defaulting to 2am
-			let fromdsttime = match get_or_default(bytes, 0) {
+			let fromdsttime = match get_first_or_default(bytes) {
 				b'/' => {
-					bytes = get_or_invalid(bytes, 1..)?;
-					let (t, offset) = TzSpec::parse_time(bytes, true)?;
-					bytes = get_or_invalid(bytes, offset..)?;
+					bytes = throw!(get_or_invalid_range(bytes, 1..));
+					let (t, offset) = throw!(TzSpec::parse_time(bytes, true));
+					bytes = throw!(get_or_invalid_range(bytes, offset..));
 					t
 				}
 				_ => 7200
@@ -438,23 +470,27 @@ impl TzSpec {
 		if bytes.len() == 0 {
 			// Invert UTC offset, since we add the offset to UTC time to calculate local time, rather than
 			// subtract as is done in TZ strings
-			Ok(Some(TzSpec {
+			Ok(TzSpec {
 				utoff: -utoff,
 				dst
-			}))
+			})
 		} else {
 			Err(TzStringError::UnexpectedInput)
 		}
 	}
 
 	/// Match valid TZ string timezone name characters
-	#[inline(always)]
-	fn match_name(x: &&u8) -> bool {
-		match x {
-			b':' | b',' | b'-' | b'+' | b'\n' | 0 => false,
-			b'0'..=b'9' => false,
-			_ => true
+	const fn match_name(bytes: &[u8]) -> usize {
+		let mut i = 0;
+		let len = bytes.len();
+		while i < len {
+			match bytes[i] {
+				b':' | b',' | b'-' | b'+' | b'\n' | 0 => break,
+				b'0'..=b'9' => break,
+				_ => i += 1
+			}
 		}
+		i
 	}
 
 	/// Parse a timestamp (hr:min:sec) from a TZ string.
@@ -486,17 +522,17 @@ impl TzSpec {
 	/// assert_eq!(TzSpec::parse_time(b"5:70", false), Err(Error::InvalidOrUnsupportedTzString));
 	/// assert_eq!(TzSpec::parse_time(b"200", true), Err(Error::InvalidOrUnsupportedTzString));
 	/// ```
-	fn parse_time(mut bytes: &[u8], extended: bool) -> Result<(i32, usize), TzStringError> {
+	const fn parse_time(mut bytes: &[u8], extended: bool) -> Result<(i32, usize), TzStringError> {
 		let mut result;
 		let mut index;
 
-		let (sign, offset) = match get_or_invalid(bytes, 0)? {
+		let (sign, offset) = match throw!(get_first_or_invalid(bytes)) {
 			b'-' => (-1, 1),
 			b'+' => (1, 1),
 			_ => (1, 0)
 		};
 		index = offset;
-		bytes = get_or_invalid(bytes, offset..)?;
+		bytes = throw!(get_or_invalid_range(bytes, offset..));
 
 		// Read hours (required)
 		let (hours, offset) = parse_num(bytes);
@@ -508,12 +544,13 @@ impl TzSpec {
 		}
 		result = hours * 3600;
 		index += offset;
-		bytes = get_or_invalid(bytes, offset..)?;
+		bytes = throw!(get_or_invalid_range(bytes, offset..));
 
 		// Read optional minutes and seconds
-		for m in [60, 1] {
-			match bytes.get(0).copied() {
-				Some(b':') => bytes = get_or_invalid(bytes, 1..)?,
+		let mut m = 60;
+		while m > 0 {
+			match get_first_or_default(bytes) {
+				b':' => bytes = throw!(get_or_invalid_range(bytes, 1..)),
 				_ => break
 			}
 
@@ -525,7 +562,8 @@ impl TzSpec {
 			}
 			result += minsec * m;
 			index += offset + 1;
-			bytes = get_or_invalid(bytes, offset..)?
+			bytes = throw!(get_or_invalid_range(bytes, offset..));
+			m /= 60;
 		}
 
 		Ok((sign * result as i32, index))
@@ -542,7 +580,7 @@ impl TzSpec {
 	///
 	/// ```
 	/// # use time::tz::{TzSpec, TzInfo};
-	/// let spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap().unwrap();
+	/// let spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
 	/// assert_eq!(spec.info(1710053999), TzInfo { utoff: -18000, isdst: false });
 	/// assert_eq!(spec.info(1710054000), TzInfo { utoff: -14400, isdst: true });
 	/// assert_eq!(spec.info(1730613599), TzInfo { utoff: -14400, isdst: true });
@@ -583,10 +621,46 @@ impl TzSpec {
 	}
 }
 
+/// Parse a constant byte slice containing a TZ string.
+///
+/// # Panics
+///
+/// This macro performs compile-time evaluation of the input and panics if [`TzSpec::parse`]
+/// returns any of the [`TzStringError`] variants.
+///
+/// # Examples
+/// ```
+/// # use time::tz::parse_tzstring_const;
+/// // This call will not panic at compile time and will guarantee a valid Timezone
+/// let _tz = parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3");
+///
+/// // Uncommenting the following line would panic during compilation with error
+/// // "Date component out of range"
+/// // let _tz = parse_tzstring_const!(b"CET-1CEST,M35.5.0,M10.5.0/3");
+/// ```
+#[macro_export]
+macro_rules! parse_tzstring_const {
+	($str:literal) => {
+		$crate::tz::Timezone::from(const {
+			match $crate::tz::TzSpec::parse($str) {
+				Ok(v) => v,
+				Err($crate::tz::TzStringError::MissingTzString) => panic!("Missing TZ string"),
+				Err($crate::tz::TzStringError::MissingTzDateRule) => panic!("Missing TZ date rule"),
+				Err($crate::tz::TzStringError::DateOutOfRange) => panic!("Date component out of range"),
+				Err($crate::tz::TzStringError::TimeOutOfRange) => panic!("Time component out of range"),
+				Err($crate::tz::TzStringError::InvalidTzDateRuleSpecifier) => panic!("Invalid date rule"),
+				Err($crate::tz::TzStringError::UnexpectedInput) => panic!("Unexpected input at end of TZ string"),
+				Err($crate::tz::TzStringError::InvalidOrUnsupportedTzString) => panic!("Invalid TZ string")
+			}
+		})
+	}
+}
+pub use parse_tzstring_const;
+
 /// Parse a byte slice containing a TZ string.
 ///
-/// This function does not precompute any transition times, so all calls to functions on the
-/// returned timezone will compute transition times during the call.
+/// When parsing constant TZ strings known at compile-time, prefer [`parse_tzstring_const`] which
+/// will evaluate the TZ string and give a compiler error if it is invalid.
 ///
 /// # Errors
 ///
@@ -601,11 +675,7 @@ impl TzSpec {
 /// assert_eq!(info, TzInfo { utoff: -25200, isdst: true });
 /// ```
 pub fn parse_tzstring(tzstring: &[u8]) -> Result<Timezone, TzStringError> {
-	Ok(Timezone {
-		#[cfg(feature = "alloc")]
-		times: Box::default(),
-		spec: TzSpec::parse(tzstring)?
-	})
+	TzSpec::parse(tzstring).map(Timezone::from)
 }
 
 #[cfg(test)]
@@ -715,15 +785,15 @@ mod tests {
 
 	#[test]
 	fn tz_spec_parse() {
-		assert_eq!(TzSpec::parse(b""), Ok(None));
+		assert_eq!(TzSpec::parse(b""), Err(TzStringError::MissingTzString));
 		assert_eq!(TzSpec::parse(b"\n"), Err(TzStringError::InvalidOrUnsupportedTzString));
 		assert_eq!(TzSpec::parse(b"EST"), Err(TzStringError::InvalidOrUnsupportedTzString));
 
-		assert_eq!(TzSpec::parse(b"EST5"), Ok(Some(TzSpec {
+		assert_eq!(TzSpec::parse(b"EST5"), Ok(TzSpec {
 			utoff: -18000,
 			dst: None
-		})));
-		assert_eq!(TzSpec::parse(b"CET-1CEST,M3.5.0,M10.5.0/3"), Ok(Some(TzSpec {
+		}));
+		assert_eq!(TzSpec::parse(b"CET-1CEST,M3.5.0,M10.5.0/3"), Ok(TzSpec {
 			utoff: 3600,
 			dst: Some((
 				7200,
@@ -732,8 +802,8 @@ mod tests {
 					fromdst: (TzDateRule::M(10, 5, 0), 10800)
 				}
 			))
-		})));
-		assert_eq!(TzSpec::parse(b"ABC-12DEF,M11.1.0,M1.2.1/147"), Ok(Some(TzSpec {
+		}));
+		assert_eq!(TzSpec::parse(b"ABC-12DEF,M11.1.0,M1.2.1/147"), Ok(TzSpec {
 			utoff: 43200,
 			dst: Some((
 				46800,
@@ -742,8 +812,8 @@ mod tests {
 					fromdst: (TzDateRule::M(1, 2, 1), 529200)
 				}
 			))
-		})));
-		assert_eq!(TzSpec::parse(b"IST-2IDT,M3.4.4/26,M10.5.0"), Ok(Some(TzSpec {
+		}));
+		assert_eq!(TzSpec::parse(b"IST-2IDT,M3.4.4/26,M10.5.0"), Ok(TzSpec {
 			utoff: 7200,
 			dst: Some((
 				10800,
@@ -752,8 +822,8 @@ mod tests {
 					fromdst: (TzDateRule::M(10, 5, 0), 7200)
 				}
 			))
-		})));
-		assert_eq!(TzSpec::parse(b"XXX4YYY,J1/0,J365/25"), Ok(Some(TzSpec {
+		}));
+		assert_eq!(TzSpec::parse(b"XXX4YYY,J1/0,J365/25"), Ok(TzSpec {
 			utoff: -14400,
 			dst: Some((
 				-10800,
@@ -762,8 +832,8 @@ mod tests {
 					fromdst: (TzDateRule::J(365), 90000)
 				}
 			))
-		})));
-		assert_eq!(TzSpec::parse(b"XXX4:30YYY6:45,25/3:10:30,280/-1:20"), Ok(Some(TzSpec {
+		}));
+		assert_eq!(TzSpec::parse(b"XXX4:30YYY6:45,25/3:10:30,280/-1:20"), Ok(TzSpec {
 			utoff: -16200,
 			dst: Some((
 				-24300,
@@ -772,7 +842,7 @@ mod tests {
 					fromdst: (TzDateRule::N(280), -4800)
 				}
 			))
-		})));
+		}));
 
 		assert_eq!(parse_tzstring(b"XXX4:30YYY6:45,25/3:10:30,280/-1:20").unwrap().spec, Some(TzSpec {
 			utoff: -16200,
@@ -788,7 +858,7 @@ mod tests {
 
 	#[test]
 	fn tz_spec_info() {
-		let mut spec = TzSpec::parse(b"EST5").unwrap().unwrap();
+		let mut spec = TzSpec::parse(b"EST5").unwrap();
 		// Closure to create an iterator that iterates between Jan 1, 2024 and Dec 31, 2024, one day
 		// at a time
 		let create_iterator = || {
@@ -809,7 +879,7 @@ mod tests {
 			}, "time: {}", t);
 		}
 
-		spec = TzSpec::parse(b"EST5EDT,70,230").unwrap().unwrap();
+		spec = TzSpec::parse(b"EST5EDT,70,230").unwrap();
 		for t in create_iterator() {
 			assert_eq!(spec.info(t),
 				if t < 1710140400 || t >= 1723960800 {
@@ -829,7 +899,7 @@ mod tests {
 		assert_eq!(spec.info(1723960799), TzInfo { utoff: -14400, isdst: true }, "time: {}", 1723960799);
 		assert_eq!(spec.info(1723960800), TzInfo { utoff: -18000, isdst: false }, "time: {}", 1723960800);
 
-		spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap().unwrap();
+		spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
 		for t in create_iterator() {
 			assert_eq!(spec.info(t),
 				if t < 1710054000 || t >= 1730613600 {
@@ -849,7 +919,7 @@ mod tests {
 		assert_eq!(spec.info(1730613599), TzInfo { utoff: -14400, isdst: true }, "time: {}", 1730613599);
 		assert_eq!(spec.info(1730613600), TzInfo { utoff: -18000, isdst: false }, "time: {}", 1730613600);
 
-		spec = TzSpec::parse(b"EST5EDT,M3.2.0/4,M11.1.0/-2").unwrap().unwrap();
+		spec = TzSpec::parse(b"EST5EDT,M3.2.0/4,M11.1.0/-2").unwrap();
 		for t in create_iterator() {
 			assert_eq!(spec.info(t),
 				if t < 1710061200 || t >= 1730599200 {

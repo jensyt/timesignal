@@ -22,7 +22,7 @@
 //! # Examples
 //!
 //! ```
-//! # use time::{time::Tm, tz::{parse_tzstring, TzInfo, TmWithTzInfo}};
+//! # use time::{time::Tm, tz::{TzInfo, TmWithTzInfo}};
 //! # #[cfg(feature = "std")] use time::tz::parse_file;
 //! # #[cfg(feature = "std")] {
 //! // Parsing a file
@@ -46,7 +46,7 @@ use alloc::{boxed::Box, string::String};
 #[cfg(feature = "std")]
 use std::{fs, io, path::Path, string::ToString};
 use super::tzstring::{TzStringError, TzSpec};
-use super::{Timezone, TzInfo, get_or_default};
+use super::{get_first_or_default, Timezone, TzInfo};
 
 /// The error type for parsing timezone data (TZif files).
 #[derive(Debug, PartialEq)]
@@ -273,7 +273,7 @@ where T: ParseType
 		bytes = get_or_invalid(bytes, offset..)?;
 
 		// TZ string is enclosed in newlines
-		if get_or_default(bytes, 0) != b'\n' {
+		if get_first_or_default(bytes) != b'\n' {
 			return Err(TzFileError::InvalidTzFile)
 		}
 		let (e, b) = get_or_invalid(bytes, 1..)?.split_last().ok_or(TzFileError::InvalidTzFile)?;
@@ -282,7 +282,7 @@ where T: ParseType
 		}
 
 		// Parse the TZ string
-		TzSpec::parse(b)?
+		Some(TzSpec::parse(b)?)
 	} else {
 		None
 	};

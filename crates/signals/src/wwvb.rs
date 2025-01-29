@@ -107,7 +107,7 @@ const DUT1: [(i64, u8); 112] = [
 /// // Wed, Jul 04 2012 17:30:18 UTC
 /// let time = 1341423018;
 /// // US western time zone
-/// let timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+/// let timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 ///
 /// // Calendar date/time for current time
 /// let utc = Tm::new(time).expect("Time must be >= 0");
@@ -147,7 +147,7 @@ const DST_LEAP_ENCODING: [u8; 8] = [0x10, 0x25, 0x26, 0x03,
 ///
 /// # Examples
 /// ```ignore
-/// timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0/3,M11.1.0").unwrap();
+/// timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0/3,M11.1.0");
 /// // 2rd Sunday of March; 3am
 /// assert_eq!(next_dst(2024, false, &timezone), 0x20);
 /// ```
@@ -167,7 +167,7 @@ const NEXT_DST_SPRING: [u8; 24] = [0x31, 0x2A, 0x04,  // 1st Sunday of March; 1a
 ///
 /// # Examples
 /// ```ignore
-/// timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+/// timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 /// // 1st Sunday of November, 2am
 /// assert_eq!(next_dst(2024, true, &timezone), 0x1B);
 /// ```
@@ -197,11 +197,11 @@ const NEXT_DST_FALL: [u8; 24] = [0x37, 0x0D, 0x32,  // 4th Sunday before N1; 1am
 ///
 /// # Examples
 /// ```ignore
-/// let mut timezone = tz::parse_tzstring(b"PST8").unwrap();
+/// let mut timezone = tz::parse_tzstring_const!(b"PST8");
 /// assert_eq!(next_dst(2024, false, &timezone), 0x07);
 ///
 /// // Current US west coast rule (on 2024-12-28)
-/// timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+/// timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 /// assert_eq!(next_dst(2024, false, &timezone), 0x1B);
 /// assert_eq!(next_dst(2024, true, &timezone), 0x1B);
 /// ```
@@ -278,7 +278,7 @@ fn next_dst(year: u16, isdst: bool, timezone: &Timezone) -> u8 {
 /// # Examples
 /// ```ignore
 /// // US Pacific timezone, UTC-8 (standard time) / UTC-7 (daylight savings time)
-/// let timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+/// let timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 ///
 /// // Wednesday, July 4, 2012. 10:30:18 UTC-7 / 17:30:18 UTC.
 /// let m = MessageUncompressed::new(1341423018, &timezone).unwrap();
@@ -503,7 +503,7 @@ impl WWVB {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC-5 / UTC-4) that cannot fail
 	/// 		let _d = WWVB::new(
-	/// 			time::tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").ok()
+	/// 			Some(time::tz::parse_tzstring_const!(b"EST5EDT,M3.2.0,M11.1.0"))
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
@@ -517,9 +517,9 @@ impl WWVB {
 						.map(|t| WWVB { ny_tz: t })
 						.map_err(|e| MessageError::TimezoneError(e)),
 			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-			None => tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0")
-						.map(|t| WWVB { ny_tz: t })
-						.map_err(|e| MessageError::TimezoneError(e))
+			None => Ok(WWVB {
+				ny_tz: tz::parse_tzstring_const!(b"EST5EDT,M3.2.0,M11.1.0")
+			})
 		}
 	}
 }
@@ -804,45 +804,45 @@ mod tests {
 
 	#[test]
 	fn next_dst_test() {
-		let mut timezone = tz::parse_tzstring(b"PST8").unwrap();
+		let mut timezone = tz::parse_tzstring_const!(b"PST8");
 		assert_eq!(next_dst(2024, false, &timezone), 0x07);
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 		assert_eq!(next_dst(2024, false, &timezone), 0x1B); // 2nd Sunday of March, 2am
 		assert_eq!(next_dst(2024, true, &timezone), 0x1B); // 1st Sunday of November, 2am
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0/1,M11.1.0/1").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0/1,M11.1.0/1");
 		assert_eq!(next_dst(2024, false, &timezone), 0x26); // 2nd Sunday of March, 1am
 		assert_eq!(next_dst(2024, true, &timezone), 0x26); // 1st Sunday of November, 1am
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0/3,M11.1.0/3").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0/3,M11.1.0/3");
 		assert_eq!(next_dst(2024, false, &timezone), 0x20); // 2nd Sunday of March, 3am
 		assert_eq!(next_dst(2024, true, &timezone), 0x20); // 1st Sunday of November, 3am
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0/4,M11.1.0/3").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0/4,M11.1.0/3");
 		assert_eq!(next_dst(2024, false, &timezone), 0x23); // Invalid (4am)
 		assert_eq!(next_dst(2024, true, &timezone), 0x20); // 1st Sunday of November, 3am
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M3.5.0,M11.5.0").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.5.0,M11.5.0");
 		assert_eq!(next_dst(2024, false, &timezone), 0x02); // 4th Sunday after M1, 2am
 		assert_eq!(next_dst(2023, false, &timezone), 0x01); // 4th Sunday of March, 2am
 		assert_eq!(next_dst(2024, true, &timezone), 0x29); // 4th Sunday of November, 2am
 		assert_eq!(next_dst(2025, true, &timezone), 0x23); // Invalid (5th Sunday of November)
 
-		timezone = tz::parse_tzstring(b"PST8PDT,M4.4.0,M10.1.0").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,M4.4.0,M10.1.0");
 		assert_eq!(next_dst(2024, false, &timezone), 0x23); // Invalid (8th Sunday after M1)
 		assert_eq!(next_dst(2023, false, &timezone), 0x29); // 7th Sunday after M1
 		assert_eq!(next_dst(2024, true, &timezone), 0x0D); // 4th Sunday before N1
 		assert_eq!(next_dst(2027, true, &timezone), 0x23); // Invalid (5th Sunday before N1)
 
-		timezone = tz::parse_tzstring(b"PST8PDT,J10,J200").unwrap();
+		timezone = tz::parse_tzstring_const!(b"PST8PDT,J10,J200");
 		assert_eq!(next_dst(2025, true, &timezone), 0x23); // Invalid rule type (J vs. M)
 		assert_eq!(next_dst(2025, true, &timezone), 0x23); // Invalid rule type (J vs. M)
 	}
 
 	#[test]
 	fn message_test() {
-		let timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+		let timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 		// Wed, Jul 04 2012 17:30:18 UTC
 		let m = MessageUncompressed::new(1341423018, &timezone).unwrap();
 		assert_eq!(m.utc_min_ones, 0);
@@ -1060,7 +1060,7 @@ mod tests {
 		// Wed, Jul 04 2012 17:30:18 UTC
 		let time = 1341423018;
 		// US western time zone
-		let timezone = tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+		let timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 
 		// Calendar date/time for current time
 		let utc = Tm::new(time).expect("Time must be >= 0");

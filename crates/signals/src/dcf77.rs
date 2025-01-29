@@ -271,7 +271,7 @@ impl DCF77 {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC+1 / UTC+2) that cannot fail
 	/// 		let _d = DCF77::new(
-	/// 			time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
+	/// 			Some(time::tz::parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3"))
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
@@ -285,9 +285,9 @@ impl DCF77 {
 						.map(|t| DCF77 { berlin_tz: t })
 						.map_err(|e| MessageError::TimezoneError(e)),
 			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-			None => tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3")
-						.map(|t| DCF77 { berlin_tz: t })
-						.map_err(|e| MessageError::TimezoneError(e))
+			None => Ok(DCF77 {
+				berlin_tz: tz::parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3")
+			})
 		}
 	}
 }
@@ -560,7 +560,7 @@ mod tests {
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").unwrap()
+		time::tz::parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3")
 	}
 
 	#[test]
@@ -833,7 +833,7 @@ mod tests {
 	}
 
 	#[test]
-	fn module_doctest() {
+	fn module_doctest_private() {
 		// Documentation for PM_CHIP_SEQUENCE
 		let bit = 1;
 		for chip in PM_CHIP_SEQUENCE {
@@ -844,21 +844,6 @@ mod tests {
 						};
 
 			// Use _phase to modulate carrier
-		}
-
-		// Documentation for DCF77::new
-		let d = DCF77::new(None);
-		match d {
-			Ok(_d) => {
-				// Create & use messages
-			},
-			Err(_) => {
-				// Known valid offset (UTC+1 / UTC+2) that cannot fail
-				let _d = DCF77::new(
-					time::tz::parse_tzstring(b"CET-1CEST,M3.5.0,M10.5.0/3").ok()
-				).unwrap();
-				// Create & use messages
-			}
 		}
 	}
 }

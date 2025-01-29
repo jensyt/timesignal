@@ -60,10 +60,13 @@ pub mod tzfile;
 #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
 pub use tzfile::*;
 
-/// Get a given index, if valid, or return [`Default::default()`].
+/// Get first byte, if valid, or return 0.
 #[inline(always)]
-fn get_or_default(bytes: &[u8], index: usize) -> u8 {
-	bytes.get(index).copied().unwrap_or_default()
+const fn get_first_or_default(bytes: &[u8]) -> u8 {
+	match bytes.first() {
+		Some(v) => *v,
+		None => 0
+	}
 }
 
 /// Timezone information at a moment in time.
@@ -100,9 +103,9 @@ pub struct TmWithTzInfo {
 /// # Examples
 ///
 /// ```
-/// # use time::{time::Tm, tz::{parse_tzstring, TzInfo, TmWithTzInfo}};
+/// # use time::{time::Tm, tz::{parse_tzstring_const, TzInfo, TmWithTzInfo}};
 /// // Parsing a TZ string
-/// let timezone = parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+/// let timezone = parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 ///
 /// // Getting info for a given unix timestamp
 /// let info = timezone.info(1723433665);
@@ -140,8 +143,8 @@ impl Timezone {
 	/// # Examples
 	///
 	/// ```
-	/// # use time::tz::{parse_tzstring, TzInfo};
-	/// let timezone = parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+	/// # use time::tz::{parse_tzstring_const, TzInfo};
+	/// let timezone = parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 	/// assert_eq!(timezone.info(1723433665), TzInfo { utoff: -25200, isdst: true });
 	/// ```
 	#[cfg(feature = "alloc")]
@@ -170,8 +173,8 @@ impl Timezone {
 	/// # Examples
 	///
 	/// ```
-	/// # use time::tz::{parse_tzstring, TzInfo};
-	/// let timezone = parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+	/// # use time::tz::{parse_tzstring_const, TzInfo};
+	/// let timezone = parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 	/// assert_eq!(timezone.info(1723433665), TzInfo { utoff: -25200, isdst: true });
 	/// ```
 	#[cfg(not(feature = "alloc"))]
@@ -189,8 +192,8 @@ impl Timezone {
 	/// # Examples
 	///
 	/// ```
-	/// # use time::{time::Tm, tz::{parse_tzstring, TzInfo, TmWithTzInfo}};
-	/// let timezone = parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap();
+	/// # use time::{time::Tm, tz::{parse_tzstring_const, TzInfo, TmWithTzInfo}};
+	/// let timezone = parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
 	/// assert_eq!(timezone.date(1723433665), Some(TmWithTzInfo {
 	/// 	tm: Tm { sec: 25, min: 34, hour: 20, day: 11, mon: 8, year: 124, wday: 0, yday: 224 },
 	/// 	info: TzInfo { utoff: -25200, isdst: true }
@@ -272,6 +275,17 @@ impl Timezone {
 	}
 }
 
+impl From<TzSpec> for Timezone {
+	/// Convert a [`TzSpec`] into a [`Timezone`] without any precomputed times.
+	fn from(value: TzSpec) -> Self {
+		Self {
+			#[cfg(feature = "alloc")]
+			times: Default::default(),
+			spec: Some(value)
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -284,7 +298,7 @@ mod tests {
 		};
 		assert_eq!(tz.info(1704672000), TzInfo { utoff: 0, isdst: false });
 
-		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
+		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").ok();
 		assert_eq!(tz.info(1704672000), TzInfo { utoff: -18000, isdst: false });
 		assert_eq!(tz.info(1710053999), TzInfo { utoff: -18000, isdst: false });
 		assert_eq!(tz.info(1710054000), TzInfo { utoff: -14400, isdst: true });
@@ -301,7 +315,7 @@ mod tests {
 		};
 		assert_eq!(tz.info(1704672000), TzInfo { utoff: 0, isdst: false });
 
-		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
+		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").ok();
 		assert_eq!(tz.info(1704672000), TzInfo { utoff: -18000, isdst: false });
 		assert_eq!(tz.info(1710053999), TzInfo { utoff: -18000, isdst: false });
 		assert_eq!(tz.info(1710054000), TzInfo { utoff: -14400, isdst: true });
@@ -327,7 +341,7 @@ mod tests {
 
 		assert!(tz.offsets().into_iter().eq([0, 0]));
 
-		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
+		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").ok();
 		assert!(tz.offsets().into_iter().eq([-18000, -14400]));
 	}
 
@@ -341,7 +355,7 @@ mod tests {
 
 		assert_eq!(tz.offsets().into_iter().count(), 0);
 
-		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").unwrap();
+		tz.spec = TzSpec::parse(b"EST5EDT,M3.2.0,M11.1.0").ok();
 		assert!(tz.offsets().into_iter().eq([-18000, -14400]));
 
 		tz.times = Box::new([(1710054000, TzInfo { utoff: -20000, isdst: false }),

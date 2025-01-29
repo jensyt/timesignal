@@ -553,7 +553,7 @@ impl Junghans {
 	/// 	Err(_) => {
 	/// 		// Known valid offset (UTC-8 / UTC-7) that cannot fail
 	/// 		let _j = Junghans::new(
-	/// 			time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+	/// 			Some(time::tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0"))
 	/// 		).unwrap();
 	/// 		// Create & use messages
 	/// 	}
@@ -566,8 +566,7 @@ impl Junghans {
 			None => tz::parse_file("/etc/localtime")
 						.map_err(|e| MessageError::TimezoneError(e))?,
 			#[cfg(any(target_arch = "wasm32", not(feature = "std")))]
-			None => tz::parse_tzstring(b"UTC0")
-						.map_err(|e| MessageError::TimezoneError(e))?
+			None => tz::parse_tzstring_const!(b"UTC0")
 		};
 
 		for offset in local_tz.offsets() {
@@ -613,7 +612,7 @@ impl MessageGenerator for Junghans {
 	/// # use signals::MessageGenerator;
 	/// # use time::TimeSpec;
 	/// let j = Junghans::new(
-	/// 	time::tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+	/// 	Some(time::tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0"))
 	/// ).unwrap();
 	/// // Sun, May 26, 2024. 16:58:10 UTC.
 	/// let mut time = TimeSpec {
@@ -831,12 +830,12 @@ mod tests {
 	use super::*;
 
 	fn get_timezone() -> Timezone {
-		tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").unwrap()
+		tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0")
 	}
 
 	#[test]
 	fn timezone_test() {
-		assert_eq!(Junghans::new(tz::parse_tzstring("ABC9:20".as_bytes()).ok()),
+		assert_eq!(Junghans::new(Some(tz::parse_tzstring_const!(b"ABC9:20"))),
 				   Err(MessageError::UnsupportedTimezoneOffset(-33600)));
 	}
 
@@ -1081,7 +1080,7 @@ mod tests {
 			Err(_) => {
 				// Known valid offset (UTC-8 / UTC-7) that cannot fail
 				let _j = Junghans::new(
-					tz::parse_tzstring(b"PST8PDT,M3.2.0,M11.1.0").ok()
+					Some(tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0"))
 				).unwrap();
 				// Create & use messages
 			}

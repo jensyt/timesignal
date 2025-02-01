@@ -18,11 +18,12 @@
 //! In addition to one required argument (the signal to generate), this application supports
 //! several optional command line arguments for configuration:
 //!
-//! | Short form | Long form    | Argument              | Default          | Description                     |
-//! | ---------- | ------------ | --------------------- | ---------------- | ------------------------------- |
-//! | `-n`, `-c` | `--count`    | Integer > 0           | 4                | The number of messages to ouput |
-//! | `-t`       | `--timezone` | Filename or TZ string | Signal-dependent | The [timezone] to use           |
-//! |            | `--ntp`      | Hostname or IP        | None             | Use [NTP] to determine the time |
+//! | Short form | Long form    | Argument                | Default          | Description                     |
+//! | ---------- | ------------ | ----------------------- | ---------------- | ------------------------------- |
+//! | `-n`, `-c` | `--count`    | Integer > 0             | 4                | The number of messages to ouput |
+//! | `-z`       | `--timezone` | Filename or [TZ string] | Signal-dependent | The [timezone] to use           |
+//! | `-t`       | `--time`     | [Date time string]      | Current time     | The starting time to transmit   |
+//! |            | `--ntp`      | Hostname or IP          | None             | Use [NTP] to determine the time |
 //!
 //! For public time signals, the message rate is one message per minute. For Junghans, the message
 //! rate is four messages per minute.
@@ -49,6 +50,8 @@
 //!
 //! [timezone]: time::tz
 //! [NTP]: sntp
+//! [TZ string]: time::tz::tzstring
+//! [date time string]: time::parse::parse_timestamp
 //!
 //! # Examples
 //!
@@ -64,8 +67,8 @@
 //!
 //! Transmit Junghans using the US east timezone
 //! ```sh
-//! timesignal -t /usr/share/zoneinfo/America/New_York junghans
-//! timesignal -t "EST5EDT,M3.2.0,M11.1.0" junghans
+//! timesignal -z /usr/share/zoneinfo/America/New_York junghans
+//! timesignal -z "EST5EDT,M3.2.0,M11.1.0" junghans
 //! ```
 
 use std::error::Error;
@@ -341,9 +344,12 @@ macro_rules! play {
 				let n = $mod::new($args.timezone)?;
 
 				// Get current time
-				let mut time = match $args.ntp {
-					Some(addr) => sntp::get_ntp_time(&addr)?,
-					None => time::now().ok_or("Failed to get current system time")?
+				let mut time = match $args.time {
+					Some(t) => t,
+					None => match $args.ntp {
+						Some(addr) => sntp::get_ntp_time(&addr)?,
+						None => time::now().ok_or("Failed to get current system time")?
+					}
 				};
 
 				// Create time signal messages
@@ -406,7 +412,8 @@ Usage: timesignal [OPTIONS] <SIGNAL>
 
 Options:
   -n, -c, --count <COUNT>   the number of messages to output, default 4
-  -t, --timezone <TIMEZONE> the timezone to use, default depends on signal
+  -z, --timezone <TIMEZONE> the timezone to use, default depends on signal
+  -t, --time <DATETIME>     the starting time to use, defaults to now
   --ntp <SERVER>            the NTP server to use for time, default none
 
 Supported signals:
@@ -416,7 +423,8 @@ Supported signals:
 
 Examples:
   timesignal -n 6 wwvb
-  timesignal -t \"EST5EDT,M3.2.0,M11.1.0\" junghans
+  timesignal -z \"EST5EDT,M3.2.0,M11.1.0\" junghans
+  timesignal -t \"2024-04-12 10:27:00.519 -07:00\" junghans
   timesignal -n 8 --ntp time.google.com dcf77\n");
 				ExitCode::SUCCESS
 			} else {
@@ -425,6 +433,10 @@ Examples:
 			}
 		}
 	};
+
+	if args.time.is_some() && args.ntp.is_some() {
+		println!("Warning: --ntp does nothing when manual time is set with -t or --time");
+	}
 
 	play(args)
 		.inspect_err(|e| eprintln!("{}", e))

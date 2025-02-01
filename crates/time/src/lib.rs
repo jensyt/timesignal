@@ -62,5 +62,7 @@ extern crate std;
 
 pub mod time;
 pub mod tz;
+pub mod parse;
 
 pub use time::*;
+pub use parse::*;

@@ -54,7 +54,8 @@ The supported options are:
 | Short Form | Long Form   | Value                 | Default          | Description                      |
 | ---------- | ----------- | --------------------- | ---------------- | -------------------------------- |
 | `-n`, `-c` | `--count`   | Positive Integer      | 4                | The number of messages to send.  |
-| `-t`       | `--timezone`| Filename or TZ string | Signal-dependent | The timezone to use. More below. |
+| `-z`       | `--timezone`| Filename or TZ string | Signal-dependent | The timezone to use. More below. |
+| `-t`       | `--time`    | Date time string      | Current time     | The starting time to transmit.   |
 |            | `--ntp`     | Hostname or IP        | None             | Use NTP to determine the time.   |
 
 For public time signals, the message rate is one message per minute. For Junghans, the message rate
@@ -71,16 +72,25 @@ Timezone files must be in [TZif format], which is common to Unix-like systems. A
 [TZ string] can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is
 specified in the TZ string, the rules for switching to/from DST must be included.
 
+Date time strings follow a similar format to [Javascript], with some small modifications: niche
+features (extended years, special 24:00:00 time) are unsupported, dates and times without a
+timezone are always interpreted as UTC, and spaces are allowed between date and time components.
+
 ## Examples
 Run the Junghans signal for two minutes (8 messages), setting a custom timezone configuration:
 ```sh
-timesignal -n 8 -t "CET-1CEST,M3.5.0,M10.5.0/3" junghans
+timesignal -n 8 -z "CET-1CEST,M3.5.0,M10.5.0/3" junghans
 ```
 
 Run the DCF77 signal for four minutes (default), using Google's NTP server to get the most accurate
 current time:
 ```sh
 timesignal --ntp time.google.com dcf77
+```
+
+Run the WWVB signal for four minutes (default), using a fixed starting time:
+```sh
+timesignal -t "2024-06-03 17:21:05.692 -08:00" wwvb
 ```
 
 ## Modifying the Code
@@ -101,3 +111,4 @@ Documentation for the Junghans message format can be found at the top of `src/ju
 [TZif format]: https://www.rfc-editor.org/rfc/rfc9636.txt
 [TZ string]: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
 [cargo-nextest]: https://nexte.st/
+[Javascript]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date#date_time_string_format

@@ -8,6 +8,7 @@ use std::fmt::{Display, Debug};
 use std::num::NonZero;
 use std::str::FromStr;
 use time::tz::{self, Timezone, TzFileError};
+use time::{parse_timestamp, ParseError, TimeSpec};
 
 /// Known time signal types.
 ///
@@ -85,6 +86,9 @@ pub enum ArgumentsError {
 	/// An error occured while parsing the provided timezone. The underlying timezone error is
 	/// returned as the payload for this variant.
 	TimezoneError(TzFileError),
+	/// An error occured while parsing the provide date time string. The underlying parse error is
+	/// returned as the payload for this variant.
+	DateTimeParseError(ParseError),
 	/// Help option (-h) was included, so print help details and exit.
 	Help
 }
@@ -99,6 +103,7 @@ impl Display for ArgumentsError {
 			ArgumentsError::InvalidCount(s) => write!(f, "Invalid count: {}", s),
 			ArgumentsError::MissingParameter(s) => write!(f, "Missing parameter for option {}", s),
 			ArgumentsError::TimezoneError(t) => write!(f, "Timezone error: {}", t),
+			ArgumentsError::DateTimeParseError(e) => write!(f, "Datetime parsing error: {}", e),
 			ArgumentsError::Help => write!(f, "Help requested")
 		}
 	}
@@ -158,6 +163,8 @@ pub struct Arguments {
 	pub count: NonZero<usize>,
 	/// The configured timezone (if provided).
 	pub timezone: Option<Timezone>,
+	/// The configured start time (if provided).
+	pub time: Option<TimeSpec>,
 	/// The configured NTP server (if provided).
 	pub ntp: Option<String>
 }
@@ -190,6 +197,7 @@ impl Arguments {
 		let mut signal: Result<SignalType, ArgumentsError> = Err(ArgumentsError::MissingSignal);
 		let mut count: Option<NonZero<usize>> = None;
 		let mut timezone: Option<Timezone> = None;
+		let mut time: Option<TimeSpec> = None;
 		let mut ntp: Option<String> = None;
 		let mut arg = args.next();
 		let mut i = 0;
@@ -206,7 +214,7 @@ impl Arguments {
 					// Increment because we called args.next()
 					i += 1;
 				},
-				t @ ("-t" | "--timezone") => {
+				t @ ("-z" | "--timezone") => {
 					if let Some(a) = args.next() {
 						timezone = Some(tz::parse_file(a.as_os_str()).or_else(|e| {
 							if let TzFileError::FileReadError(_) = e {
@@ -220,6 +228,16 @@ impl Arguments {
 					}
 					// Increment because we called args.next()
 					i += 1;
+				},
+				t @ ("-t" | "--time") => {
+					if let Some(a) = args.next() {
+						time = Some(
+							parse_timestamp(a.as_encoded_bytes())
+								.map_err(|e| ArgumentsError::DateTimeParseError(e))?
+						)
+					} else {
+						return Err(ArgumentsError::MissingParameter(t.to_string()))
+					}
 				},
 				"--ntp" => {
 					ntp = Some(String::from(arg_to_str(i+1, Some("--ntp"), args.next().as_ref())?))
@@ -242,6 +260,7 @@ impl Arguments {
 			signal: signal?,
 			count: count.unwrap_or(unsafe { NonZero::new_unchecked(4) }),
 			timezone,
+			time,
 			ntp
 		})
 	}
@@ -305,7 +324,8 @@ mod tests {
 	fn arguments_parse_test() {
 		let args: Vec<_> = vec![
 			"-n", "5",
-			"-t", "EST5EDT,M3.2.0,M11.1.0",
+			"-z", "EST5EDT,M3.2.0,M11.1.0",
+			"-t", "2024-04-12 10:27:00.519 -07:00",
 			"--ntp", "time.google.com",
 			"junghans",
 			"-c", "7",
@@ -314,71 +334,77 @@ mod tests {
 			"-n", "asd",
 			"-n", "0",
 			"-n", "-5",
-			"-t", "EST5EDT"
+			"-z", "EST5EDT"
 		].into_iter().map(OsString::from_str).map(Result::unwrap).collect();
 
 		assert_eq!(
-			// -n 5 -t EST5EDT,M3.2.0,M11.1.0 --ntp time.google.com junghans
-			Arguments::parse(args.iter().take(7).cloned()),
+			// -n 5 -z EST5EDT,M3.2.0,M11.1.0 -t "2024-04-12 10:27:00.519 -7:00" --ntp time.google.com junghans
+			Arguments::parse(args.iter().take(9).cloned()),
 			Ok(Arguments {
 				signal: SignalType::Junghans,
 				count: NonZero::new(5).unwrap(),
 				timezone: tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").ok(),
+				time: Some(TimeSpec { sec: 1712942820, nsec: 519000000 }),
 				ntp: Some(String::from("time.google.com"))
 			})
 		);
 
 		assert_eq!(
 			// -n 5 junghans
-			Arguments::parse(args.iter().take(2).chain(args.iter().skip(6).take(1)).cloned()),
+			Arguments::parse(args.iter().take(2).chain(args.iter().skip(8).take(1)).cloned()),
 			Ok(Arguments {
 				signal: SignalType::Junghans,
 				count: NonZero::new(5).unwrap(),
 				timezone: None,
+				time: None,
 				ntp: None
 			})
 		);
 
 		assert_eq!(
-			// -t EST5EDT,M3.2.0,M11.1.0 junghans
-			Arguments::parse(args.iter().skip(2).take(2).chain(args.iter().skip(6).take(1)).cloned()),
+			// -z EST5EDT,M3.2.0,M11.1.0 junghans
+			Arguments::parse(args.iter().skip(2).take(2).chain(args.iter().skip(8).take(1)).cloned()),
 			Ok(Arguments {
 				signal: SignalType::Junghans,
 				count: NonZero::new(4).unwrap(),
 				timezone: tz::parse_tzstring(b"EST5EDT,M3.2.0,M11.1.0").ok(),
+				time: None,
 				ntp: None
 			})
 		);
 
 		assert_eq!(
 			// --ntp time.google.com junghans
-			Arguments::parse(args.iter().skip(4).take(3).cloned()),
+			Arguments::parse(args.iter().skip(6).take(3).cloned()),
 			Ok(Arguments {
 				signal: SignalType::Junghans,
 				count: NonZero::new(4).unwrap(),
 				timezone: None,
+				time: None,
 				ntp: Some(String::from("time.google.com"))
 			})
 		);
 
 		assert_eq!(
 			// -c 7 --timezone /usr/share/zoneinfo/America/Los_Angeles dcf77
-			Arguments::parse(args.iter().skip(7).take(5).cloned()),
+			Arguments::parse(args.iter().skip(9).take(5).cloned()),
 			Ok(Arguments {
 				signal: SignalType::DCF77,
 				count: NonZero::new(7).unwrap(),
 				timezone: tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok(),
+				time: None,
 				ntp: None
 			})
 		);
 
 		assert_eq!(
-			// -n 5 -c 7 -t EST5EDT,M3.2.0,M11.1.0 --timezone /usr/share/zoneinfo/America/Los_Angeles dcf77
-			Arguments::parse(args.iter().take(4).chain(args.iter().skip(7).take(5)).cloned()),
+			// -n 5 -c 7 -z EST5EDT,M3.2.0,M11.1.0 --timezone /usr/share/zoneinfo/America/Los_Angeles dcf77
+			Arguments::parse(args.iter().take(4).chain(args.iter().skip(9).take(5)).cloned()),
 			Ok(Arguments {
 				signal: SignalType::DCF77,
 				count: NonZero::new(7).unwrap(),
 				timezone: tz::parse_file("/usr/share/zoneinfo/America/Los_Angeles").ok(),
+				time: None,
 				ntp: None
 			})
 		);
@@ -397,26 +423,26 @@ mod tests {
 
 		assert_eq!(
 			// -n asd
-			Arguments::parse(args.iter().skip(12).take(2).cloned()),
+			Arguments::parse(args.iter().skip(14).take(2).cloned()),
 			Err(ArgumentsError::InvalidCount(String::from("asd")))
 		);
 
 		assert_eq!(
 			// -n 0
-			Arguments::parse(args.iter().skip(14).take(2).cloned()),
+			Arguments::parse(args.iter().skip(16).take(2).cloned()),
 			Err(ArgumentsError::InvalidCount(String::from("0")))
 		);
 
 		assert_eq!(
 			// -n -5
-			Arguments::parse(args.iter().skip(16).take(2).cloned()),
+			Arguments::parse(args.iter().skip(18).take(2).cloned()),
 			Err(ArgumentsError::InvalidCount(String::from("-5")))
 		);
 
 		assert!(
-			// -t EST5EDT junghans
+			// -z EST5EDT junghans
 			Arguments::parse(
-				args.iter().skip(18).take(2).chain(args.iter().skip(6).take(1)).cloned()
+				args.iter().skip(20).take(2).chain(args.iter().skip(8).take(1)).cloned()
 			).is_err()
 		);
 	}

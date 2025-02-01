@@ -1,3 +1,20 @@
+# Version 0.2.0 (2025-01-31)
+
+Added the ability to set a custom time from the command line rather than using the current time.
+This is a breaking change with v0.1.0 because the command line parameters have changed. The relevant
+changes can be seen below:
+
+v0.1.0:
+| Short Form | Long Form   | Value                 | Default          | Description                      |
+| ---------- | ----------- | --------------------- | ---------------- | -------------------------------- |
+| `-t`       | `--timezone`| Filename or TZ string | Signal-dependent | The timezone to use. More below. |
+
+v0.2.0:
+| Short Form | Long Form   | Value                 | Default          | Description                      |
+| ---------- | ----------- | --------------------- | ---------------- | -------------------------------- |
+| `-z`       | `--timezone`| Filename or TZ string | Signal-dependent | The timezone to use. More below. |
+| `-t`       | `--time`    | Date time string      | Current time     | The starting time to transmit.   |
+
 # Version 0.1.0 (2025-01-03)
 
 Initial release with support for [WWVB], [DCF77], and Junghans's proprietary format.

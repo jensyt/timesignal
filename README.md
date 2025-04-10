@@ -19,6 +19,9 @@ Why use this instead of the many other time signal generators available? Three p
    supported clock or watch.
 
 ## Quick Setup Guide
+Try it online [here](https://timesignal.pages.dev/)!
+
+Alternatively, to install the program locally:
 1. Install a recent version of [Rust].
     - On Linux, you may also need to install the `libasound2-dev` package on Debian-based
       distributions or `alsa-lib-devel` on Fedora.
@@ -33,7 +36,7 @@ clock or watch are in reception mode!
 As an alternative to step 3 above, you can build and run the program separately:
 
 3. Run `cargo build -r`
-4. Run `target/release/timesignal <signal>`
+4. Run `./target/release/timesignal <signal>`
 
 ## Command Line Options
 The general form for running this program is
@@ -94,9 +97,11 @@ timesignal -t "2024-06-03 17:21:05.692 -08:00" wwvb
 ```
 
 ## Modifying the Code
-Feel free to modify and add code as you see fit. To build the documentation, run `cargo doc` and
-then open `target/doc/timesignal/index.html`. To run unit tests, run `cargo test` or if you have
+Feel free to modify and add code as you see fit. To build the documentation, run `just doc` and
+then open `target/doc/timesignal/index.html`. To run unit tests, run `just test` or if you have
 [cargo-nextest] run `cargo nextest run`.
+
+If you don't have [just], you can open and run the commands from `justfile` manually.
 
 Documentation for the Junghans message format can be found at the top of `src/junghans.rs`.
 
@@ -112,3 +117,4 @@ Documentation for the Junghans message format can be found at the top of `src/ju
 [TZ string]: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
 [cargo-nextest]: https://nexte.st/
 [Javascript]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date#date_time_string_format
+[just]: https://github.com/casey/just

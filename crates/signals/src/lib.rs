@@ -4,11 +4,10 @@
 //! proprietary time signal ([Junghans]). Each signal can be written into a supplied buffer at
 //! a desired sample rate.
 //!
-//! This crate is `no_std` by default. However, in order to support a variety of `no_std`
-//! environments this crate requires an external implementation of a 32-bit sine function with the
-//! following signature: `fn customsin(x: f32) -> f32`.
+//! This crate is `no_std` by default. In order to support a variety of `no_std` environments this
+//! crate includes a simplified version of 32-bit sine from `libm`.
 //!
-//! Enabling feature `std` makes three signicant changes:
+//! Enabling feature `std` makes three significant changes:
 //!	- Uses [`f32::sin`] from the standard library as the implementation for 32-bit sine function.
 //! - Adds support for parsing TZif files into [`time::tz::Timezone`].
 //! - Changes the default behavior of several time signals (except for `wasm32` targets):
@@ -258,14 +257,9 @@ fn sin32(x: f32) -> f32 {
 }
 
 #[cfg(all(not(test), not(feature = "std")))]
-unsafe extern {
-	/// 32-bit sine function.
-	///
-	/// This version requires defining a external sine function with signature
-	/// `fn customsin(x: f32) -> f32`.
-	#[link_name = "customsin"]
-	safe fn sin32(x: f32) -> f32;
-}
+mod sin;
+#[cfg(all(not(test), not(feature = "std")))]
+use sin::sin32;
 
 #[cfg(test)]
 mod tests {

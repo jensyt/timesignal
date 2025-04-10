@@ -65,13 +65,13 @@ pub enum TzStringError {
 impl fmt::Display for TzStringError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			TzStringError::MissingTzString => write!(f, "Missing TZ string"),
-			TzStringError::MissingTzDateRule => write!(f, "Missing TZ date rule"),
-			TzStringError::DateOutOfRange => write!(f, "Date component out of range"),
-			TzStringError::TimeOutOfRange => write!(f, "Time component out of range"),
-			TzStringError::InvalidTzDateRuleSpecifier => write!(f, "Invalid date rule"),
-			TzStringError::UnexpectedInput => write!(f, "Unexpected input at end of TZ string"),
-			TzStringError::InvalidOrUnsupportedTzString => write!(f, "Invalid TZ string")
+			TzStringError::MissingTzString => f.write_str("Missing TZ string"),
+			TzStringError::MissingTzDateRule => f.write_str("Missing TZ date rule"),
+			TzStringError::DateOutOfRange => f.write_str("Date component out of range"),
+			TzStringError::TimeOutOfRange => f.write_str("Time component out of range"),
+			TzStringError::InvalidTzDateRuleSpecifier => f.write_str("Invalid date rule"),
+			TzStringError::UnexpectedInput => f.write_str("Unexpected input at end of TZ string"),
+			TzStringError::InvalidOrUnsupportedTzString => f.write_str("Invalid TZ string")
 		}
 	}
 }
@@ -633,10 +633,12 @@ impl TzSpec {
 /// # use time::tz::parse_tzstring_const;
 /// // This call will not panic at compile time and will guarantee a valid Timezone
 /// let _tz = parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3");
+/// ```
 ///
-/// // Uncommenting the following line would panic during compilation with error
-/// // "Date component out of range"
-/// // let _tz = parse_tzstring_const!(b"CET-1CEST,M35.5.0,M10.5.0/3");
+/// ```compile_fail
+/// // The following line will panic at compile time with error "Date component out of range"
+/// let _tz = parse_tzstring_const!(b"CET-1CEST,M35.5.0,M10.5.0/3");
+/// // The issue is here ------------------------^^
 /// ```
 #[macro_export]
 macro_rules! parse_tzstring_const {

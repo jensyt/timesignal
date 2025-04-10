@@ -49,15 +49,21 @@ use crate::sin32;
 
 /// Pseudorandom chip sequence for phase modulated signal.
 ///
-/// Described in detail [here](https://en.wikipedia.org/wiki/DCF77#Phase_modulation). For ease of
-/// use, this chip sequence is stored with one bit per byte, where each byte has a value of either
-/// zero or one.
+/// Described in detail [here](https://en.wikipedia.org/wiki/DCF77#Phase_modulation). To minimize
+/// storage space, bits are packed in the following array, starting at the LSB of
+/// `PM_CHIP_SEQUENCE[0]`.
+const PM_CHIP_SEQUENCE: &[u8; 64] = include_bytes!("../assets/dcf77_chip_sequence.bin");
+
+/// Get the pseudorandom chip for a given index.
+///
+/// See [`PM_CHIP_SEQUENCE`] for more details.
 ///
 /// # Examples
 /// ```ignore
-/// let bit = 1;
-/// for chip in PM_CHIP_SEQUENCE {
-/// 	let _phase = PI / 180. * if bit ^ chip == 1 {
+/// let bit = true;
+/// for i in 0..512 {
+/// 	let chip = get_pm_chip(i);
+/// 	let _phase = PI / 180. * if bit ^ chip {
 /// 					-15.6
 /// 				} else {
 /// 					15.6
@@ -66,7 +72,12 @@ use crate::sin32;
 /// 	// Use _phase to modulate carrier
 /// }
 /// ```
-const PM_CHIP_SEQUENCE: &[u8; 512] = include_bytes!("../assets/dcf77_chip_sequence.bin");
+#[inline(always)]
+fn get_pm_chip(index: usize) -> bool {
+	let byte = index / 8;
+	let bit = index % 8;
+	((PM_CHIP_SEQUENCE.get(byte).copied().unwrap_or(0) >> bit) & 0x01) > 0
+}
 
 /// An unpacked / uncompressed DCF77 message.
 ///
@@ -524,7 +535,7 @@ pub fn make_writer<const S: u64>() -> impl FnMut(&mut SampledMessage<S>, &mut [f
 			let phase_i = if i >= phase_start && i <= phase_end {
 				// Each chip spans 120 cycles of the 77.5 kHz carrier
 				let chip_i = (i - phase_start) * 77500 / (120 * S);
-				let chip = PM_CHIP_SEQUENCE.get(chip_i as usize).copied().unwrap_or(0) > 0;
+				let chip = get_pm_chip(chip_i as usize);
 				PI / 180. * if phase ^ chip {
 					-15.6
 				} else {
@@ -776,7 +787,7 @@ mod tests {
 		check_no_phase(&buf[3650..3660], offset + 3650);
 		let bound_start = 3680;
 		for i in 0..512 {
-			let chip = PM_CHIP_SEQUENCE.get(i).copied().unwrap_or(0) > 0;
+			let chip = get_pm_chip(i);
 			bound = bound_start + i * 120 * 48000 / 77500;
 			check_is_phase(&buf[bound..bound+10], offset + bound, !chip);
 		}
@@ -788,7 +799,7 @@ mod tests {
 				check_no_phase(&buf[bound..bound+10], offset + bound);
 			}
 			for i in 0..512 {
-				let chip = PM_CHIP_SEQUENCE.get(i).copied().unwrap_or(0) > 0;
+				let chip = get_pm_chip(i);
 				let b = bound + 9600 + i * 120 * 48000 / 77500;
 				check_is_phase(&buf[b..b+10], offset + b, bit ^ chip);
 			}
@@ -822,7 +833,7 @@ mod tests {
 				check_no_phase(&buf[bound..bound+10], bound);
 			}
 			for i in 0..512 {
-				let chip = PM_CHIP_SEQUENCE.get(i).copied().unwrap_or(0) > 0;
+				let chip = get_pm_chip(i);
 				let b = bound + 9600 + i * 120 * 48000 / 77500;
 				check_is_phase(&buf[b..b+10], b, bit ^ chip);
 			}
@@ -835,9 +846,10 @@ mod tests {
 	#[test]
 	fn module_doctest_private() {
 		// Documentation for PM_CHIP_SEQUENCE
-		let bit = 1;
-		for chip in PM_CHIP_SEQUENCE {
-			let _phase = PI / 180. * if bit ^ chip == 1 {
+		let bit = true;
+		for i in 0..512 {
+			let chip = get_pm_chip(i);
+			let _phase = PI / 180. * if bit ^ chip {
 							-15.6
 						} else {
 							15.6

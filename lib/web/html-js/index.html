@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Timesignal - Generate time signals for radio-controlled clocks</title>
+	<link rel="preload" href="web.wasm" as="fetch" crossorigin />
+	<link rel="preload" href="worklet-processor.js" as="fetch" crossorigin />
+	<style>
+		html {
+			font-family: sans-serif;
+		}
+		body {
+			margin: 0 20px;
+		}
+		input, select {
+			display: block;
+			-webkit-appearance: none;
+			-moz-appearance: none;
+			appearance: none;
+			background-color: #fff;
+			border-color: #6b7280;
+			border-width: 1px;
+			border-radius: 0px;
+			padding-top: 0.5rem;
+			padding-right: 0.75rem;
+			padding-bottom: 0.5rem;
+			padding-left: 0.75rem;
+			font-size: 1rem;
+			line-height: 1.5rem;
+			box-sizing: border-box;
+			width: 100%;
+			margin-top: 0.25rem;
+		}
+
+		select {
+			background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+			background-position: right 0.5rem center;
+			background-repeat: no-repeat;
+			background-size: 1.5em 1.5em;
+			padding-right: 2.5rem;
+		}
+
+		input::placeholder {
+			color: #6b7280;
+			opacity: 1;
+			font-style: italic;
+		}
+
+		input:focus, select:focus {
+			border-color: #2563eb;
+			outline: 1px solid #2563eb;
+		}
+
+		#inputs {
+			max-width: 28rem;
+			display: flex;
+			flex-direction: column;
+			gap: 1.5rem;
+		}
+
+		label {
+			display: block;
+		}
+
+		button {
+			border-radius: 3px;
+			background-color: oklch(.623 .214 259.815);
+			color: white;
+			border: 0px solid transparent;
+			line-height: 20px;
+			padding: 8px 20px;
+			font-size: 16px;
+		}
+
+		button:hover {
+			background-color: oklch(.546 .245 262.881);
+		}
+
+		button:active {
+			background-color: oklch(.488 .243 264.376);
+		}
+
+		#buttons {
+			display: flex;
+			flex-direction: row;
+			gap: 1rem;
+			align-items: end;
+		}
+
+		a {
+			color: oklch(.623 .214 259.815);
+			text-decoration: none;
+			border-bottom: 1px solid oklch(.623 .214 259.815);
+		}
+	</style>
+</head>
+
+<body>
+	<h1>Timesignal</h1>
+	<p>Generate time signals for setting radio-controlled clocks with no extra hardware.</p>
+	<div id="inputs">
+		<label for="signal">
+			Signal:
+			<select id="signal">
+				<option value="junghans" selected>Junghans</option>
+				<option value="wwvb">WWVB</option>
+				<option value="dcf77">DCF77</option>
+			</select>
+		</label>
+		<label for="timezone">
+			Custom timezone:
+			<input type="text" id="timezone" placeholder="Optional" />
+		</label>
+		<div id="buttons">
+			<div style="flex-grow: 1;">
+				<a href="https://github.com/jensyt/timesignal">Source</a>
+			</div>
+			<button id="play">Play</button>
+		</div>
+	</div>
+
+	<script type="module">
+		// Start loading the WASM module
+		const wasm = WebAssembly.compileStreaming(fetch("web.wasm"));
+
+		// Get an approximation of the current timezone as a TZ string.
+		// This function works by finding the date and hour at which the UTC offset changes. To reduce
+		// code size, it does not attempt to prettify the TZ string or take advantage of TZ string
+		// defaults.
+		function getCurrentTimezone() {
+			const d = new Date();
+			d.setMonth(0, 1);
+			d.setHours(0, 0, 0, 0);
+			let curOffset = d.getTimezoneOffset();
+			let std = 0;
+			let stdtime = 0;
+			let stdoffset = curOffset;
+			let dst;
+			let dsttime;
+			let dstoffset;
+			const getTime = () => {
+				let hour = 0;
+				for (; hour < 24; hour++) {
+					d.setHours(hour, 0, 0, 0);
+					const offset = d.getTimezoneOffset();
+					if (offset != curOffset) break;
+				}
+				d.setHours(23, 59, 59, 999);
+				return hour;
+			};
+			d.setHours(23, 59, 59, 999);
+			for (let month = 0, jd = 0; month < 12; month++) {
+				for (let day = 1; day <= 31; day++, jd++) {
+					d.setMonth(month, day);
+					if (d.getMonth() != month) break;
+					const offset = d.getTimezoneOffset();
+					if (offset > curOffset) {
+						std = jd;
+						stdoffset = offset;
+						stdtime = getTime();
+					} else if (offset < curOffset) {
+						dst = jd;
+						dstoffset = offset;
+						dsttime = getTime();
+					}
+					curOffset = offset;
+				}
+			}
+			// ~~ is a hack to truncate to an integer
+			const stdhr = ~~(stdoffset / 60);
+			const stdmin = stdoffset % 60;
+			if (typeof dst !== "undefined") {
+				const dsthr = ~~(dstoffset / 60);
+				const dstmin = dstoffset % 60;
+				return `STD${stdhr}:${stdmin}DST${dsthr}:${dstmin},${dst}/${dsttime},${std}/${stdtime}`;
+			} else {
+				return `STD${stdhr}:${stdmin}`;
+			}
+		}
+
+		const currentTz = getCurrentTimezone();
+
+		// Get either the custom timezone the user configured or
+		function getTimezone(signal) {
+			let tz = document.getElementById("timezone").value;
+			if (tz.length == 0 && signal == "junghans") {
+				return currentTz;
+			}
+			return tz;
+		}
+
+		document.getElementById("play").addEventListener("click", async function(event) {
+			// Audio context can only be created by user interaction, so set a handler that will only
+			// be called on the first click to do initial setup.
+			const audiocontext = new AudioContext({ sampleRate: 48000 });
+			const [worklet, module] = await Promise.all([
+				audiocontext.audioWorklet.addModule("worklet-processor.js"),
+				wasm
+			]);
+			const audionode = new AudioWorkletNode(audiocontext, "worklet-processor");
+
+			// Handle errors from the worklet
+			audionode.port.onmessage = (event) => {
+				if (event.data.type === 'error') {
+					if (playing) document.getElementById("play").dispatchEvent(new Event("click"));
+					alert(event.data.message);
+				}
+			};
+
+			// Initialize the module
+			audionode.port.postMessage({type: "init", module});
+			// Start playing audio
+			const signal = document.getElementById('signal').value;
+			audionode.port.postMessage({type: "play", signal, timezone: getTimezone(signal)});
+			audionode.connect(audiocontext.destination);
+
+			// Update state
+			event.target.innerText = "Pause";
+			let playing = true;
+
+			// Add event listener to run on subsequent play/pause clicks
+			event.target.addEventListener("click", function(event) {
+				if (playing) {
+					audionode.port.postMessage({type: "stop"});
+					audiocontext.suspend();
+					event.target.innerText = "Play";
+					playing = false;
+				} else {
+					const signal = document.getElementById('signal').value;
+					audionode.port.postMessage({type: "play", signal, timezone: getTimezone(signal)});
+					audiocontext.resume();
+					event.target.innerText = "Pause";
+					playing = true;
+				}
+			});
+		}, { once: true });
+
+		// Update default timezone placeholder text when changing signal types
+		document.getElementById("signal").addEventListener("change", function() {
+			var p = "Optional"
+			switch (this.value) {
+				case "junghans":
+					p = currentTz;
+					break;
+				case "wwvb":
+					p = "EST5EDT,M3.2.0,M11.1.0";
+					break;
+				case "dcf77":
+					p = "CET-1CEST,M3.5.0,M10.5.0/3";
+					break;
+			}
+			document.getElementById("timezone").placeholder = p;
+		});
+		document.getElementById("signal").dispatchEvent(new Event("change"));
+	</script>
+</body>
+
+</html>

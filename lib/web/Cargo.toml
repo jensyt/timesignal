@@ -1,0 +1,12 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/jensyt/timesignal"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+time = { path = "../../crates/time" }
+signals = { path = "../../crates/signals" }

@@ -1,0 +1,6 @@
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=32768", "-C", "target-feature=+simd128"]
+
+[target.wasm32-wasip2]
+rustflags = ["-C", "link-arg=-zstack-size=32768", "-C", "target-feature=+simd128"]
+runner = "wasmtime"

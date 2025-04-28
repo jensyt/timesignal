@@ -43,7 +43,7 @@
 mod alloc;
 
 use core::{ptr, slice};
-use signals::{dcf77, junghans, wwvb, MessageError, MessageGenerator};
+use signals::{dcf77, jjy, junghans, wwvb, MessageError, MessageGenerator};
 use time::{tz::{self, TzStringError}, TimeSpec};
 
 /// Custom panic handler for WebAssembly that simply halts execution.
@@ -59,6 +59,8 @@ const SIGNAL_JUNGHANS: u8 = 0;
 const SIGNAL_WWVB: u8 = 1;
 /// Transmit a DCF77 signal.
 const SIGNAL_DCF77: u8 = 2;
+/// Transmit a JJY signal.
+const SIGNAL_JJY: u8 = 3;
 
 /// The size of the custom argument stack in bytes.
 ///
@@ -304,6 +306,7 @@ fn make_writer_impl(signal: u8, mut time: TimeSpec, timezone: &[u8]) -> Result<u
 		SIGNAL_JUNGHANS => make_writer_impl_!(junghans, timezone, time),
 		SIGNAL_WWVB => make_writer_impl_!(wwvb, timezone, time),
 		SIGNAL_DCF77 => make_writer_impl_!(dcf77, timezone, time),
+		SIGNAL_JJY => make_writer_impl_!(jjy, timezone, time),
 		_ => Err("Invalid signal type")
 	}
 }

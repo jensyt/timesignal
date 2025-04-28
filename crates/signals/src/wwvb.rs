@@ -48,7 +48,7 @@
 //! }
 //! ```
 
-use time::{minute_of_century_from_timestamp, nextleapsecond, wday_from_ymd, Seconds, TimeSpec, Tm};
+use time::{minute_of_century_from_timestamp, nextleapsecond, wday_from_ymd, TimeSpec, Tm};
 use time::tz::{self, Timezone, TzDateRule};
 use crate::{Message, MessageError, MessageGenerator, SampledMessage};
 use core::f32::consts::PI;
@@ -633,10 +633,11 @@ impl MessageGenerator for WWVB {
 		let ns = time_in_min * 1000000000 + time.nsec;
 
 		// Calculate if this is a minute with leap second
-		let leap = nextleapsecond(sec).filter(|(t, _)| *t == sec).is_some();
+		let nextsec = sec + 60;
+		let leap = nextleapsecond(nextsec).filter(|(t, _)| *t == nextsec).is_some();
 
 		// Increment the clock
-		*time += Seconds(60 - time_in_min);
+		time.sec = nextsec;
 		time.nsec = 0;
 
 		Ok(Message::new_with_alt(am, fm, ns, leap))
@@ -936,20 +937,20 @@ mod tests {
 		assert_eq!(message.delay, 0);
 		assert_eq!(message.leap, false);
 
-		time.sec = 741484800;
+		time.sec = 741484740;
+		let message = wwvb.get_message(&mut time).unwrap();
+		assert_eq!(time.sec, 741484800);
+		assert_eq!(time.nsec, 0);
+		assert_eq!(message.packed.reverse_bits(), 0x5488614044348CE0);
+		assert_eq!(message.packed_alt.reverse_bits(), 0x3B41F771603FBB60);
+		assert_eq!(message.delay, 0);
+		assert_eq!(message.leap, true);
+
 		let message = wwvb.get_message(&mut time).unwrap();
 		assert_eq!(time.sec, 741484860);
 		assert_eq!(time.nsec, 0);
 		assert_eq!(message.packed.reverse_bits(), 0x000001408A648C60);
 		assert_eq!(message.packed_alt.reverse_bits(), 0x3B41677160401B60);
-		assert_eq!(message.delay, 0);
-		assert_eq!(message.leap, true);
-
-		let message = wwvb.get_message(&mut time).unwrap();
-		assert_eq!(time.sec, 741484920);
-		assert_eq!(time.nsec, 0);
-		assert_eq!(message.packed.reverse_bits(), 0x008001408A648C60);
-		assert_eq!(message.packed_alt.reverse_bits(), 0x3B43377160421B60);
 		assert_eq!(message.delay, 0);
 		assert_eq!(message.leap, false);
 	}
@@ -1133,5 +1134,31 @@ mod tests {
 
 		// Encoded DST/leap config => DST in effect, not changing in next 24 hours, no leap second this month.
 		assert_eq!(dstleap, 0x03);
+
+		// Documentation for MessageUncompressed
+		// US Pacific timezone, UTC-8 (standard time) / UTC-7 (daylight savings time)
+		let timezone = tz::parse_tzstring_const!(b"PST8PDT,M3.2.0,M11.1.0");
+
+		// Wednesday, July 4, 2012. 10:30:18 UTC-7 / 17:30:18 UTC.
+		let m = MessageUncompressed::new(1341423018, &timezone).unwrap();
+		assert_eq!(m.utc_min_ones, 0);            // Minute 30
+		assert_eq!(m.utc_min_tens, 3);
+		assert_eq!(m.utc_hour_ones, 7);           // Hour 17
+		assert_eq!(m.utc_hour_tens, 1);
+		assert_eq!(m.utc_yday_ones, 6);           // Day 186
+		assert_eq!(m.utc_yday_tens, 8);
+		assert_eq!(m.utc_yday_huns, 1);
+		assert_eq!(m.utc_year_ones, 2);           // Year [20]12
+		assert_eq!(m.utc_year_tens, 1);
+		assert_eq!(m.dut1, 0xA4);                 // DUT1 0.4s
+		assert_eq!(m.leapyear, 0x1);              // Leap year
+		assert_eq!(m.leapsecond, 0x0);            // No leap second this month
+		assert_eq!(m.dst, 0x3);                   // DST in effect and not changing in next 24 hours
+		assert_eq!(m.minute_of_century, 6578970); // Minute 6578970 of century (since Jan 1, 2000)
+		assert_eq!(m.next_dst, 0x1B);             // Next DST change is 1st Sunday of Nov, 2am
+
+		let (a, p) = m.pack();
+		assert_eq!(a.reverse_bits(), 0x3004E1418A408960);
+		assert_eq!(p.reverse_bits(), 0x3B4483218C341B60);
 	}
 }

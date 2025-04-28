@@ -16,6 +16,7 @@
 //! 	| [`junghans`] | `UTC0`                       | `/etc/localtime`                       |
 //! 	| [`wwvb`]     | `EST5EDT,M3.2.0,M11.1.0`     | `/usr/share/zoneinfo/America/New_York` |
 //! 	| [`dcf77`]    | `CET-1CEST,M3.5.0,M10.5.0/3` | `/usr/share/zoneinfo/Europe/Berlin`    |
+//! 	| [`jjy`]      | `JST-9`                      | `/usr/share/zoneinfo/Asia/Tokyo`       |
 //!
 //! [DCF77]: https://en.wikipedia.org/wiki/DCF77
 //! [WWVB]: https://en.wikipedia.org/wiki/WWVB
@@ -71,6 +72,7 @@ use time::{TimeSpec, tz};
 pub mod junghans;
 pub mod dcf77;
 pub mod wwvb;
+pub mod jjy;
 
 /// A time signal message to transmit.
 #[derive(Default, Clone, Copy)]

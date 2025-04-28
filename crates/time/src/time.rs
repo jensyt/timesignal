@@ -317,7 +317,7 @@ pub struct Tm {
 	pub mon: u8,
 	/// Years since 1900, ranged [0, 255] => [1900, 2155]
 	pub year: u8,
-	/// Day of the week, ranged [0, 7] => [Sunday, Saturday]
+	/// Day of the week, ranged [0, 6] => [Sunday, Saturday]
 	pub wday: u8,
 	/// Day of the year, ranged [1, 366]
 	pub yday: u16

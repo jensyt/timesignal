@@ -22,10 +22,8 @@ pub enum SignalType {
 	DCF77,
 	/// USA's [WWVB](https://en.wikipedia.org/wiki/WWVB).
 	WWVB,
-	/// Japan's [JJY40](https://en.wikipedia.org/wiki/JJY).
-	JJY40,
-	/// Japan's [JJY60](https://en.wikipedia.org/wiki/JJY).
-	JJY60,
+	/// Japan's [JJY](https://en.wikipedia.org/wiki/JJY).
+	JJY,
 	/// UK's [MSF](https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)).
 	MSF
 }
@@ -55,8 +53,9 @@ impl FromStr for SignalType {
 			"junghans" => Ok(SignalType::Junghans),
 			"dcf77" => Ok(SignalType::DCF77),
 			"wwvb" => Ok(SignalType::WWVB),
-			"jjy40" => Ok(SignalType::JJY40),
-			"jjy60" => Ok(SignalType::JJY60),
+			"jjy" => Ok(SignalType::JJY),
+			"jjy40" => Ok(SignalType::JJY),
+			"jjy60" => Ok(SignalType::JJY),
 			"msf" => Ok(SignalType::MSF),
 			_ => Err(ArgumentsError::InvalidSignal(s.to_string()))
 		}
@@ -278,10 +277,12 @@ mod tests {
 		assert_eq!(SignalType::from_str("DCF77"), Ok(SignalType::DCF77));
 		assert_eq!(SignalType::from_str("wwvb"), Ok(SignalType::WWVB));
 		assert_eq!(SignalType::from_str("WWVB"), Ok(SignalType::WWVB));
-		assert_eq!(SignalType::from_str("jjy40"), Ok(SignalType::JJY40));
-		assert_eq!(SignalType::from_str("JJY40"), Ok(SignalType::JJY40));
-		assert_eq!(SignalType::from_str("jjy60"), Ok(SignalType::JJY60));
-		assert_eq!(SignalType::from_str("JJY60"), Ok(SignalType::JJY60));
+		assert_eq!(SignalType::from_str("jjy40"), Ok(SignalType::JJY));
+		assert_eq!(SignalType::from_str("JJY40"), Ok(SignalType::JJY));
+		assert_eq!(SignalType::from_str("jjy60"), Ok(SignalType::JJY));
+		assert_eq!(SignalType::from_str("JJY60"), Ok(SignalType::JJY));
+		assert_eq!(SignalType::from_str("jjy"), Ok(SignalType::JJY));
+		assert_eq!(SignalType::from_str("JJY"), Ok(SignalType::JJY));
 		assert_eq!(SignalType::from_str("msf"), Ok(SignalType::MSF));
 		assert_eq!(SignalType::from_str("MSF"), Ok(SignalType::MSF));
 

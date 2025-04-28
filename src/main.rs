@@ -34,7 +34,8 @@
 //!         /usr/share/zoneinfo/America/New_York
 //! - DCF77: the timezone represents the time in Berlin, Germany, defaulting to
 //!          /usr/share/zoneinfo/Europe/Berlin
-//! - JJY: not yet supported
+//! - JJY: the timezone represents Japan standard time, defaulting to
+//!        /usr/share/zoneinfo/Asia/Tokyo
 //!
 //! Timezone files must be in TZif format, which is common to Unix-like systems. Alternatively, a
 //! TZ string can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is
@@ -44,8 +45,9 @@
 //! - `junghans`
 //! - `dcf77`
 //! - `wwvb`
-//! - `jjy40` (currently unsupported)
-//! - `jjy60` (currently unsupported)
+//! - `jjy`
+//! - `jjy40` (alias for `jjy`)
+//! - `jjy60` (alias for `jjy`)
 //! - `msf` (currently unsupported)
 //!
 //! [timezone]: time::tz
@@ -81,7 +83,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 
 use args::{Arguments, ArgumentsError, SignalType};
-use signals::{Message, SampledMessage, MessageGenerator, dcf77, junghans, wwvb};
+use signals::{Message, SampledMessage, MessageGenerator, dcf77, junghans, wwvb, jjy};
 
 mod args;
 
@@ -390,7 +392,8 @@ fn play(args: Arguments) -> Result<ExitCode, Box<dyn Error>> {
 	play!(args,
 		SignalType::Junghans => junghans,
 		SignalType::DCF77 => dcf77,
-		SignalType::WWVB => wwvb
+		SignalType::WWVB => wwvb,
+		SignalType::JJY => jjy
 	);
 
 	Ok(ExitCode::SUCCESS)
@@ -420,6 +423,7 @@ Supported signals:
   wwvb
   dcf77
   junghans
+  jjy (alias jjy40/jjy60)
 
 Examples:
   timesignal -n 6 wwvb

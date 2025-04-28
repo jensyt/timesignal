@@ -43,7 +43,7 @@
 //! ```
 
 use core::f32::consts::PI;
-use time::{nextleapsecond, Seconds, TimeSpec, tz::{self, Timezone}};
+use time::{nextleapsecond, TimeSpec, tz::{self, Timezone}};
 use crate::{Message, MessageError, MessageGenerator, SampledMessage};
 use crate::sin32;
 
@@ -89,7 +89,7 @@ fn get_pm_chip(index: usize) -> bool {
 ///
 /// ```ignore
 /// // Berlin (CET/CEST) timezone, UTC+1 (standard time) / UTC+2 (daylight savings time)
-/// let timezone = time::tz::parse_file("/usr/share/zoneinfo/Europe/Berlin").ok();
+/// let timezone = time::tz::parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3");
 ///
 /// // Sunday, May 26, 2024. 18:58:25 UTC+2 / 16:58:25 UTC.
 /// let m = MessageUncompressed::new(1716742705, &timezone).unwrap();
@@ -369,7 +369,7 @@ impl MessageGenerator for DCF77 {
 		let leap = nextleapsecond(sec).filter(|(t, _)| *t == sec).is_some();
 
 		// Increment the clock
-		*time += Seconds(60 - time_in_min);
+		time.sec = sec;
 		time.nsec = 0;
 
 		Ok(Message::new_with_alt(am, fm, ns, leap))
@@ -857,5 +857,28 @@ mod tests {
 
 			// Use _phase to modulate carrier
 		}
+
+		// Documentation for MessageUncompressed
+		// Berlin (CET/CEST) timezone, UTC+1 (standard time) / UTC+2 (daylight savings time)
+		let timezone = time::tz::parse_tzstring_const!(b"CET-1CEST,M3.5.0,M10.5.0/3");
+
+		// Sunday, May 26, 2024. 18:58:25 UTC+2 / 16:58:25 UTC.
+		let m = MessageUncompressed::new(1716742705, &timezone).unwrap();
+		assert_eq!(m.timezone, 2);   // Currently DST, no leap second or DST change in next hour
+		assert_eq!(m.min_ones, 8);   // Minute 58
+		assert_eq!(m.min_tens, 5);
+		assert_eq!(m.hour_ones, 8);  // Hour 18
+		assert_eq!(m.hour_tens, 1);
+		assert_eq!(m.day_ones, 6);   // Day 26
+		assert_eq!(m.day_tens, 2);
+		assert_eq!(m.dow, 7);        // Sunday
+		assert_eq!(m.month_ones, 5); // Month 5 (May)
+		assert_eq!(m.month_tens, 0);
+		assert_eq!(m.year_ones, 4);  // Year [20]24
+		assert_eq!(m.year_tens, 2);
+
+		let (am, pm) = m.pack();
+		assert_eq!(am, 0x090BE631B120000);
+		assert_eq!(pm, 0x090BE631B1203FF);
 	}
 }

@@ -1,3 +1,12 @@
+# Version 0.2.1 (2025-04-28)
+
+Added support for [JJY]. Some minor `JJY` features are unsupported:
+- **Negative leap seconds**. All leap seconds to date have been positive.
+- **Alternate format**. During minutes 15 and 45 the standard time format is transmitted rather than
+  transmitting the station's call sign and service interruption notifications.
+
+This release also fixes a bug where WWVB would insert a leap second one minute too late.
+
 # Version 0.2.0 (2025-01-31)
 
 Added the ability to set a custom time from the command line rather than using the current time.
@@ -31,3 +40,4 @@ has some unsupported features:
 
 [WWVB]: https://en.wikipedia.org/wiki/WWVB
 [DCF77]: https://en.wikipedia.org/wiki/DCF77
+[JJY]: https://en.wikipedia.org/wiki/JJY

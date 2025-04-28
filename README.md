@@ -48,8 +48,7 @@ The possible signal types are:
 - `junghans`: Proprietary Junghans signal
 - `wwvb`: US's [WWVB]
 - `dcf77`: Germany's [DCF77]
-- `jjy40`: Japan's [JJY40] (not yet implemented)
-- `jjy60`: Japan's [JJY60] (not yet implemented)
+- `jjy`: Japan's [JJY]. `jjy40` and `jjy60` are aliases.
 - `msf`: UK's [MSF] (not yet implemented)
 
 The supported options are:
@@ -70,6 +69,8 @@ Each signal uses timezone information slightly differently, as described here:
             /usr/share/zoneinfo/America/New_York
 - **DCF77**: the timezone represents the time in Berlin, Germany, defaulting to
              /usr/share/zoneinfo/Europe/Berlin
+- **JJY**: the timezone represents Japan standard time, defaulting to
+           /usr/share/zoneinfo/Asia/Tokyo
 
 Timezone files must be in [TZif format], which is common to Unix-like systems. Alternatively, a
 [TZ string] can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is
@@ -108,8 +109,7 @@ Documentation for the Junghans message format can be found at the top of `src/ju
 [DCF77]: https://en.wikipedia.org/wiki/DCF77
 [WWVB]: https://en.wikipedia.org/wiki/WWVB
 [JJY40/60]: https://en.wikipedia.org/wiki/JJY
-[JJY40]: https://en.wikipedia.org/wiki/JJY
-[JJY60]: https://en.wikipedia.org/wiki/JJY
+[JJY]: https://en.wikipedia.org/wiki/JJY
 [Junghans]: https://www.junghans.de/
 [MSF]: https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)
 [Rust]: https://www.rust-lang.org/

@@ -107,6 +107,7 @@
 				<option value="junghans" selected>Junghans</option>
 				<option value="wwvb">WWVB</option>
 				<option value="dcf77">DCF77</option>
+				<option value="jjy">JJY</option>
 			</select>
 		</label>
 		<label for="timezone">
@@ -249,6 +250,9 @@
 					break;
 				case "dcf77":
 					p = "CET-1CEST,M3.5.0,M10.5.0/3";
+					break;
+				case "jjy":
+					p = "JST-9";
 					break;
 			}
 			document.getElementById("timezone").placeholder = p;

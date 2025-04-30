@@ -127,10 +127,8 @@
 		const wasm = WebAssembly.compileStreaming(fetch("web.wasm"));
 
 		// Get an approximation of the current timezone as a TZ string.
-		// This function works by finding the date and hour at which the UTC offset changes. To reduce
-		// code size, it does not attempt to prettify the TZ string or take advantage of TZ string
-		// defaults.
-		function getCurrentTimezone() {
+		// This function works by finding the date and hour at which the UTC offset changes.
+		const currentTz = (() => {
 			const d = new Date();
 			d.setMonth(0, 1);
 			d.setHours(0, 0, 0, 0);
@@ -172,16 +170,21 @@
 			// ~~ is a hack to truncate to an integer
 			const stdhr = ~~(stdoffset / 60);
 			const stdmin = stdoffset % 60;
+			var str = `STD${stdhr}`;
+			if (stdmin != 0) str += `:${stdmin}`;
 			if (typeof dst !== "undefined") {
 				const dsthr = ~~(dstoffset / 60);
 				const dstmin = dstoffset % 60;
-				return `STD${stdhr}:${stdmin}DST${dsthr}:${dstmin},${dst}/${dsttime},${std}/${stdtime}`;
-			} else {
-				return `STD${stdhr}:${stdmin}`;
+				if (dsthr == stdhr - 1 && dstmin == 0) str += "DST";
+				else str += `DST${dsthr}`;
+				if (dstmin != 0) str += `:${dstmin}`;
+				str += `,${dst}`
+				if (dsttime != 2) str += `/${dsttime}`;
+				str += `,${std}`;
+				if (stdtime != 2) str += `/${stdtime}`;
 			}
-		}
-
-		const currentTz = getCurrentTimezone();
+			return str;
+		})();
 
 		// Get either the custom timezone the user configured or
 		function getTimezone(signal) {
@@ -191,6 +194,8 @@
 			}
 			return tz;
 		}
+
+		let playing = false;
 
 		document.getElementById("play").addEventListener("click", async function(event) {
 			// Audio context can only be created by user interaction, so set a handler that will only
@@ -219,7 +224,7 @@
 
 			// Update state
 			event.target.innerText = "Pause";
-			let playing = true;
+			playing = true;
 
 			// Add event listener to run on subsequent play/pause clicks
 			event.target.addEventListener("click", function(event) {
@@ -240,7 +245,8 @@
 
 		// Update default timezone placeholder text when changing signal types
 		document.getElementById("signal").addEventListener("change", function() {
-			var p = "Optional"
+			if (playing) document.getElementById("play").dispatchEvent(new Event("click"));
+			var p = "Optional";
 			switch (this.value) {
 				case "junghans":
 					p = currentTz;

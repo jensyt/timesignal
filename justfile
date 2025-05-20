@@ -18,6 +18,9 @@ doc:
 	cargo +nightly rustdoc --all-features -p sntp  -- --cfg docsrs --document-private-items -A rustdoc::private-intra-doc-links
 	cargo +nightly rustdoc --all-features -p signals  -- --cfg docsrs --document-private-items -A rustdoc::private-intra-doc-links
 
+build:
+	RUSTFLAGS="-Zlocation-detail=none -Zfmt-debug=none" cargo +nightly build --release -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort
+
 wasm:
 	cargo build -r -p web --target wasm32-unknown-unknown
 	wasm-opt --enable-simd -o target/wasm32-unknown-unknown/release/web.opt.wasm -Oz target/wasm32-unknown-unknown/release/web.wasm

@@ -487,7 +487,6 @@ impl MessageUncompressed {
 	}
 }
 
-
 /// WWVB message generator.
 ///
 /// Messages returned from [`WWVB::get_message`] should be used with the writer returned by

@@ -48,7 +48,7 @@ mod impl_wasm {
 	/// The size of a WebAssembly page in bytes.
 	const PAGE_SIZE: usize = 65536;
 
-	extern "C" {
+	unsafe extern "C" {
 		/// The base address of the heap, set by the linker.
 		///
 		/// The *value* is meaningless and should not be read. Linker symbols store their value in the
@@ -180,7 +180,7 @@ mod impl_wasm {
 		loop {
 			// Safety: ALLOCATOR always has at least one empty block header, and we perform a null check
 			// at the end of each loop iteration to make sure this pointer is valid
-			let block = &mut *blocks;
+			let block = unsafe { &mut *blocks };
 
 			let mut offset = next_offset(
 				blocks as usize + BLOCK_LAYOUT.size() + block.size,
@@ -205,10 +205,12 @@ mod impl_wasm {
 				let next = block.next;
 				block.next = offset as *mut Block;
 				blocks = block.next;
-				blocks.write(Block { next, size: layout.size() });
+				unsafe {
+					blocks.write(Block { next, size: layout.size() });
 
-				// Return a pointer to the block data
-				return blocks.add(1) as *mut u8;
+					// Return a pointer to the block data
+					return blocks.add(1) as *mut u8;
+				}
 			}
 
 			blocks = block.next;
@@ -228,7 +230,7 @@ mod impl_wasm {
 	pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
 		let (mut blocks, _) = ALLOCATOR.get();
 
-		loop {
+		unsafe { loop {
 			let prior = blocks;
 			// Safety: ALLOCATOR always has at least one empty block header, and we perform a null check
 			// below to make sure blocks is never null at the start of this loop.
@@ -248,7 +250,7 @@ mod impl_wasm {
 				(*prior).next = (*blocks).next;
 				return;
 			}
-		}
+		}}
 	}
 
 	#[cfg(test)]
@@ -375,7 +377,7 @@ mod impl_std {
 	pub unsafe fn alloc(layout: Layout) -> *mut u8 {
 		use alloc::alloc::{alloc, handle_alloc_error};
 
-		let ptr = alloc(layout);
+		let ptr = unsafe { alloc(layout) };
 		if ptr.is_null() {
 			handle_alloc_error(layout)
 		}
@@ -386,7 +388,7 @@ mod impl_std {
 	///
 	/// See [`dealloc`](alloc::alloc::dealloc) for more details.
 	pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
-		alloc::alloc::dealloc(ptr, layout)
+		unsafe { alloc::alloc::dealloc(ptr, layout) }
 	}
 }
 

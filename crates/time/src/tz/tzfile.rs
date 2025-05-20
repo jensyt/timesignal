@@ -173,7 +173,6 @@ where I: SliceIndex<[u8]> {
 	bytes.get(index).ok_or(TzFileError::InvalidTzFile)
 }
 
-
 /// Header for the TZif file.
 ///
 /// This header excludes the magic number (`'TZif'`) and version number.

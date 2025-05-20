@@ -327,9 +327,11 @@ unsafe fn write_to_stack(ptr: *mut u8, val: &str) {
 	const { assert!(MAX_ERROR_LEN <= CUSTOM_STACK_SIZE); }
 	let val = val.as_bytes();
 	let len = core::cmp::min(val.len(), MAX_ERROR_LEN - 1);
-	ptr::copy_nonoverlapping(val.as_ptr(), ptr, len);
-	// Null-terminate
-	ptr.add(len).write(0);
+	unsafe {
+		ptr::copy_nonoverlapping(val.as_ptr(), ptr, len);
+		// Null-terminate
+		ptr.add(len).write(0);
+	}
 }
 
 /// Construct a [`Writer`] on the heap.
@@ -347,15 +349,17 @@ unsafe fn write_to_stack(ptr: *mut u8, val: &str) {
 ///
 /// The caller must ensure that `timezone` is valid and points to a contiguous block of at least
 /// `max(timezone_len, MAX_ERROR_LEN)` bytes.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn make_writer(signal: u8, msec: i64, timezone: *mut u8, timezone_len: usize) -> usize {
 	let time = TimeSpec { sec: msec / 1000, nsec: (msec % 1000) * 1000000 };
-	let t = slice::from_raw_parts(timezone, timezone_len);
-	match make_writer_impl(signal, time, t) {
-		Ok(u) => u,
-		Err(e) => {
-			write_to_stack(timezone, e);
-			0
+	unsafe {
+		let t = slice::from_raw_parts(timezone, timezone_len);
+		match make_writer_impl(signal, time, t) {
+			Ok(u) => u,
+			Err(e) => {
+				write_to_stack(timezone, e);
+				0
+			}
 		}
 	}
 }
@@ -369,10 +373,12 @@ pub unsafe extern "C" fn make_writer(signal: u8, msec: i64, timezone: *mut u8, t
 ///
 /// The caller must ensure that `writer` is a valid, non-zero handle returned by [`make_writer`]
 /// that has not yet been destroyed.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn destroy_writer(writer: usize) {
 	let writer = writer as *mut Writer;
-	writer.drop_in_place();
+	unsafe {
+		writer.drop_in_place();
+	}
 }
 
 /// Write the time signal to a buffer.
@@ -390,15 +396,17 @@ pub unsafe extern "C" fn destroy_writer(writer: usize) {
 ///
 /// The caller must ensure that `v` is valid and points to a properly aligned, contiguous block of
 /// at least `max(len * 4, MAX_ERROR_LEN)` bytes.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn write_signal(writer: usize, v: *mut f32, len: usize) -> usize {
-	let writer = &mut *(writer as *mut Writer);
-	let buf = slice::from_raw_parts_mut(v, len);
-	match writer.write(buf) {
-		Ok(n) => n,
-		Err(e) => {
-			write_to_stack(v as *mut u8, message_error_to_string(e));
-			0
+	unsafe {
+		let writer = &mut *(writer as *mut Writer);
+		let buf = slice::from_raw_parts_mut(v, len);
+		match writer.write(buf) {
+			Ok(n) => n,
+			Err(e) => {
+				write_to_stack(v as *mut u8, message_error_to_string(e));
+				0
+			}
 		}
 	}
 }

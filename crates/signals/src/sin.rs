@@ -56,10 +56,10 @@ fn rem_pio2f(x: f32) -> (i32, f64) {
 /// Copied from `libm::k_cosf`.
 #[inline(always)]
 fn k_cosf(x: f64) -> f32 {
-    let z = x * x;
-    let w = z * z;
-    let r = C2 + z * C3;
-    (((1.0 + z * C0) + w * C1) + (w * z) * r) as f32
+	let z = x * x;
+	let w = z * z;
+	let r = C2 + z * C3;
+	(((1.0 + z * C0) + w * C1) + (w * z) * r) as f32
 }
 
 /// Calculate `sin(x)` where `|x| <= pi/2`.
@@ -67,11 +67,11 @@ fn k_cosf(x: f64) -> f32 {
 /// Copied from `libm::k_sinf`.
 #[inline(always)]
 fn k_sinf(x: f64) -> f32 {
-    let z = x * x;
-    let w = z * z;
-    let r = S3 + z * S4;
-    let s = z * x;
-    ((x + s * (S1 + z * S2)) + s * w * r) as f32
+	let z = x * x;
+	let w = z * z;
+	let r = S3 + z * S4;
+	let s = z * x;
+	((x + s * (S1 + z * S2)) + s * w * r) as f32
 }
 
 /// Calculate `sin(x)` where `|x| ~< 2^28*(pi/2)`.
@@ -80,10 +80,10 @@ fn k_sinf(x: f64) -> f32 {
 pub fn sin32(x: f32) -> f32 {
 	let (n, y) = rem_pio2f(x);
 
-    match n & 3 {
-        0 => k_sinf(y),
-        1 => k_cosf(y),
-        2 => k_sinf(-y),
-        _ => -k_cosf(y),
-    }
+	match n & 3 {
+		0 => k_sinf(y),
+		1 => k_cosf(y),
+		2 => k_sinf(-y),
+		_ => -k_cosf(y),
+	}
 }

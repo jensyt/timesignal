@@ -1,7 +1,7 @@
 # timesignal
 Generate time signals for setting radio-controlled clocks with no extra hardware.
 
-This program can generate public time signals ([DCF77], [WWVB], and [JJY40/60]) as well as a
+This program can generate public time signals ([DCF77], [WWVB], [MSF], and [JJY40/60]) as well as a
 proprietary time signal ([Junghans]), outputting them to the device's default audio output. This
 works by taking advantage of stray RF signals created by audio hardware as a side effect of their
 operation -- the audio output itself is not useful as devices listening for these time signals use
@@ -49,7 +49,7 @@ The possible signal types are:
 - `wwvb`: US's [WWVB]
 - `dcf77`: Germany's [DCF77]
 - `jjy`: Japan's [JJY]. `jjy40` and `jjy60` are aliases.
-- `msf`: UK's [MSF] (not yet implemented)
+- `msf`: UK's [MSF]
 
 The supported options are:
 
@@ -71,6 +71,8 @@ Each signal uses timezone information slightly differently, as described here:
              /usr/share/zoneinfo/Europe/Berlin
 - **JJY**: the timezone represents Japan standard time, defaulting to
            /usr/share/zoneinfo/Asia/Tokyo
+- **MSF**: the timezone represents the time in London, defaulting to
+           /usr/share/zoneinfo/Europe/London
 
 Timezone files must be in [TZif format], which is common to Unix-like systems. Alternatively, a
 [TZ string] can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is

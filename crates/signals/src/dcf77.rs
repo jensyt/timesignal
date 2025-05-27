@@ -192,11 +192,11 @@ impl MessageUncompressed {
 		// DCF77 uses even parity bits over the minute, hour, and date.
 		let min =  (self.min_ones & 0xf)
 				| ((self.min_tens & 0x7) << 4);
-		let min_parity = (min.count_ones() & 0x1) as u8;
+		let min_parity = min.count_ones() & 0x1;
 
 		let hour =  (self.hour_ones & 0xf)
 				 | ((self.hour_tens & 0x3) << 4);
-		let hour_parity = (hour.count_ones() & 0x1) as u8;
+		let hour_parity = hour.count_ones() & 0x1;
 
 		let date =  (self.day_ones   as u32 & 0xf)
 				 | ((self.day_tens   as u32 & 0x3) << 4)
@@ -205,17 +205,17 @@ impl MessageUncompressed {
 				 | ((self.month_tens as u32 & 0x1) << 13)
 				 | ((self.year_ones  as u32 & 0xf) << 14)
 				 | ((self.year_tens  as u32 & 0xf) << 18);
-		let date_parity = (date.count_ones() & 0x1) as u8;
+		let date_parity = date.count_ones() & 0x1;
 
 		// Bit 20 always set to 1, indicates the start of encoded time
 		let mut r: u64 = 0x100000;
 		r |= (self.timezone as u64 & 0xf     ) << 16;
 		r |= (min           as u64 & 0x7f    ) << 21;
-		r |= (min_parity    as u64 & 0x1     ) << 28;
+		r |= (min_parity    as u64           ) << 28;
 		r |= (hour          as u64 & 0x3f    ) << 29;
-		r |= (hour_parity   as u64 & 0x1     ) << 35;
+		r |= (hour_parity   as u64           ) << 35;
 		r |= (date          as u64 & 0x7fffff) << 36;
-		r |= (date_parity   as u64 & 0x1     ) << 58;
+		r |= (date_parity   as u64           ) << 58;
 
 		// Phase modulated signal has first 10 bits set to 1
 		(r, r | 0x3ff)

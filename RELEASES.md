@@ -1,3 +1,7 @@
+# Version 0.2.2 (2025-05-26)
+
+Added support for [MSF].
+
 # Version 0.2.1 (2025-04-28)
 
 Added support for [JJY]. Some minor `JJY` features are unsupported:
@@ -41,3 +45,4 @@ has some unsupported features:
 [WWVB]: https://en.wikipedia.org/wiki/WWVB
 [DCF77]: https://en.wikipedia.org/wiki/DCF77
 [JJY]: https://en.wikipedia.org/wiki/JJY
+[MSF]: https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)

@@ -1,6 +1,6 @@
 //! Generate time signals.
 //!
-//! This crate can generate public time signals ([DCF77], [WWVB], and [JJY40/60]) as well as a
+//! This crate can generate public time signals ([DCF77], [WWVB], [MSF], and [JJY40/60]) as well as a
 //! proprietary time signal ([Junghans]). Each signal can be written into a supplied buffer at
 //! a desired sample rate.
 //!
@@ -16,10 +16,12 @@
 //! 	| [`junghans`] | `UTC0`                       | `/etc/localtime`                       |
 //! 	| [`wwvb`]     | `EST5EDT,M3.2.0,M11.1.0`     | `/usr/share/zoneinfo/America/New_York` |
 //! 	| [`dcf77`]    | `CET-1CEST,M3.5.0,M10.5.0/3` | `/usr/share/zoneinfo/Europe/Berlin`    |
+//! 	| [`msf`]      | `GMT0BST,M3.5.0/1,M10.5.0`   | `/usr/share/zoneinfo/Europe/London`    |
 //! 	| [`jjy`]      | `JST-9`                      | `/usr/share/zoneinfo/Asia/Tokyo`       |
 //!
 //! [DCF77]: https://en.wikipedia.org/wiki/DCF77
 //! [WWVB]: https://en.wikipedia.org/wiki/WWVB
+//! [MSF]: https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)
 //! [JJY40/60]: https://en.wikipedia.org/wiki/JJY
 //! [Junghans]: junghans
 //!
@@ -69,9 +71,11 @@ extern crate std;
 use core::{error, fmt};
 use time::{TimeSpec, tz};
 
+mod common;
 pub mod junghans;
 pub mod dcf77;
 pub mod wwvb;
+pub mod msf;
 pub mod jjy;
 
 /// A time signal message to transmit.

@@ -108,6 +108,7 @@
 				<option value="wwvb">WWVB</option>
 				<option value="dcf77">DCF77</option>
 				<option value="jjy">JJY</option>
+				<option value="msf">MSF</option>
 			</select>
 		</label>
 		<label for="timezone">
@@ -259,6 +260,9 @@
 					break;
 				case "jjy":
 					p = "JST-9";
+					break;
+				case "msf":
+					p = "GMT0BST,M3.5.0/1,M10.5.0";
 					break;
 			}
 			document.getElementById("timezone").placeholder = p;

@@ -153,19 +153,19 @@ impl MessageUncompressed {
 		// JJY uses even parity bits over the minute and hour.
 		let min =  (self.min_ones & 0xf)
 				| ((self.min_tens & 0x7) << 5);
-		let min_parity = (min.count_ones() & 0x1) as u8;
+		let min_parity = min.count_ones() & 0x1;
 
 		let hour =  (self.hour_ones & 0xf)
 				 | ((self.hour_tens & 0x3) << 5);
-		let hour_parity = (hour.count_ones() & 0x1) as u8;
+		let hour_parity = hour.count_ones() & 0x1;
 
 		let mut a: u64 = (min   as u64)        << 55;
 		a |= (hour              as u64)        << 45;
 		a |= ((self.yday_huns   as u64) & 0x3) << 40;
 		a |= ((self.yday_tens   as u64) & 0xf) << 35;
 		a |= ((self.yday_ones   as u64) & 0xf) << 30;
-		a |= ((hour_parity      as u64) & 0x1) << 27;
-		a |= ((min_parity       as u64) & 0x1) << 26;
+		a |=  (hour_parity      as u64)        << 27;
+		a |=  (min_parity       as u64)        << 26;
 		a |= ((self.year_tens   as u64) & 0xf) << 19;
 		a |= ((self.year_ones   as u64) & 0xf) << 15;
 		a |= ((self.day_of_week as u64) & 0x7) << 11;
@@ -435,7 +435,7 @@ impl WriterState {
 /// # use signals::jjy::{JJY, make_writer};
 /// # use signals::MessageGenerator;
 /// // Construct a JJY object to generate messages
-/// let d = JJY::new(None).expect("Error reading New York timezone");
+/// let d = JJY::new(None).expect("Error reading Tokyo timezone");
 ///
 /// // Get a message for the current time
 /// let m = d.get_message(&mut time::now().unwrap()).expect("Time must be >=0");
@@ -601,7 +601,7 @@ mod tests {
 
 	fn check_is_low(buffer: &[f32]) {
 		let p = calculate_power(buffer);
-		assert!((p - 0.063).abs() < 0.01, "Low signal expected power of 0.095, saw {}", p)
+		assert!((p - 0.063).abs() < 0.01, "Low signal expected power of 0.063, saw {}", p)
 	}
 
 	fn check_is_marker(buffer: &[f32], bound: usize) {

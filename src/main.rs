@@ -36,6 +36,8 @@
 //!          /usr/share/zoneinfo/Europe/Berlin
 //! - JJY: the timezone represents Japan standard time, defaulting to
 //!        /usr/share/zoneinfo/Asia/Tokyo
+//! - MSF: the timezone represents the time in the UK, defaulting to
+//!        /usr/share/zoneinfo/Europe/London
 //!
 //! Timezone files must be in TZif format, which is common to Unix-like systems. Alternatively, a
 //! TZ string can be used in its place (e.g. `EST5EDT,M3.2.0,M11.1.0` for US Eastern). If DST is
@@ -48,7 +50,7 @@
 //! - `jjy`
 //! - `jjy40` (alias for `jjy`)
 //! - `jjy60` (alias for `jjy`)
-//! - `msf` (currently unsupported)
+//! - `msf`
 //!
 //! [timezone]: time::tz
 //! [NTP]: sntp
@@ -83,7 +85,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 
 use args::{Arguments, ArgumentsError, SignalType};
-use signals::{Message, SampledMessage, MessageGenerator, dcf77, junghans, wwvb, jjy};
+use signals::{Message, SampledMessage, MessageGenerator, dcf77, junghans, wwvb, jjy, msf};
 
 mod args;
 
@@ -362,7 +364,7 @@ macro_rules! play {
 				// Wait for audio to complete
 				flagger.wait();
 			})+
-			_ => return Err(format!("Signal {:?} not yet supported!", $args.signal).into())
+			//_ => return Err(format!("Signal {:?} not yet supported!", $args.signal).into())
 		}
 	});
 }
@@ -393,7 +395,8 @@ fn play(args: Arguments) -> Result<ExitCode, Box<dyn Error>> {
 		SignalType::Junghans => junghans,
 		SignalType::DCF77 => dcf77,
 		SignalType::WWVB => wwvb,
-		SignalType::JJY => jjy
+		SignalType::JJY => jjy,
+		SignalType::MSF => msf
 	);
 
 	Ok(ExitCode::SUCCESS)
@@ -424,6 +427,7 @@ Supported signals:
   dcf77
   junghans
   jjy (alias jjy40/jjy60)
+  msf
 
 Examples:
   timesignal -n 6 wwvb

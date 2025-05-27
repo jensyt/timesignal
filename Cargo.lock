@@ -516,7 +516,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "signals"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "time",
 ]
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "timesignal"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "signals",
@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "signals",
  "time",

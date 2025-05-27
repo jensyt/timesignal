@@ -1,4 +1,4 @@
-# Version 0.2.2 (2025-05-26)
+# Version 0.3.0 (2025-05-26)
 
 Added support for [MSF].
 

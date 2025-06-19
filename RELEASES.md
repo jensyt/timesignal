@@ -2,6 +2,8 @@
 
 Added support for [MSF].
 
+[MSF]: https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)
+
 # Version 0.2.1 (2025-04-28)
 
 Added support for [JJY]. Some minor `JJY` features are unsupported:
@@ -10,6 +12,8 @@ Added support for [JJY]. Some minor `JJY` features are unsupported:
   transmitting the station's call sign and service interruption notifications.
 
 This release also fixes a bug where WWVB would insert a leap second one minute too late.
+
+[JJY]: https://en.wikipedia.org/wiki/JJY
 
 # Version 0.2.0 (2025-01-31)
 
@@ -44,5 +48,3 @@ has some unsupported features:
 
 [WWVB]: https://en.wikipedia.org/wiki/WWVB
 [DCF77]: https://en.wikipedia.org/wiki/DCF77
-[JJY]: https://en.wikipedia.org/wiki/JJY
-[MSF]: https://en.wikipedia.org/wiki/Time_from_NPL_(MSF)

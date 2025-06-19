@@ -64,7 +64,7 @@ use crate::common::DUT1_TIMES;
 /// This constant is split into two tables ([`DUT1_TIMES`] and [`DUT1_VALS`]) to optimize for space.
 /// The two tables must be kept in sync, where `DUT1_TIMES` represents the time of a change in the
 /// UT1-UTC offset, and `DUT1_VALS` represents the encoded UT1-UTC offset at that time.
-const DUT1_VALS: [u8; 112] = [
+const DUT1_VALS: [u8; 113] = [
 	0xA2, 0xA1, 0xA0, 0x41,
 	0x45, 0xA3, 0xA2, 0xA1,
 	0xA0, 0x43, 0xA6, 0xA4,
@@ -92,7 +92,8 @@ const DUT1_VALS: [u8; 112] = [
 	0x42, 0x43, 0x44, 0xA6,
 	0xA5, 0xA4, 0xA3, 0xA2,
 	0xA1, 0xA0, 0x41, 0x42,
-	0x41, 0xA0, 0xA1, 0xA0
+	0x41, 0xA0, 0xA1, 0xA0,
+	0xA1
 ];
 
 /// Encoded DST and leap second indicators for phase modulated signal.

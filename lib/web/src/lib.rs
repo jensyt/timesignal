@@ -17,21 +17,24 @@
 //!
 //! # Examples
 //! ```
-//! let mut stack_as_u8: [u8; CUSTOM_STACK_SIZE] = [0; CUSTOM_STACK_SIZE];
+//! // Using f32 ensures the stack is properly aligned for write_signal
+//! let mut stack_as_f32: [f32; CUSTOM_STACK_SIZE / 4] = [0.0; CUSTOM_STACK_SIZE / 4];
 //! unsafe {
-//!		let mut stack_as_f32 = transmute::<_, [f32; CUSTOM_STACK_SIZE / 4]>(stack_as_u8);
+//! 	let stack_as_u8 = &mut *((&raw mut stack_as_f32) as *mut [u8; CUSTOM_STACK_SIZE]);
 //!
-//!		let writer = make_writer(SIGNAL_WWVB, 1716742680000, stack_as_u8.as_mut_ptr(), 0);
-//!		assert_ne!(writer, 0);
+//! 	let writer = make_writer(SIGNAL_WWVB, 1716742680000, stack_as_u8.as_mut_ptr(), 0);
+//! 	assert_ne!(writer, 0);
 //!
-//!		let w = writer as *mut Writer;
-//!		assert_eq!((*w).time, TimeSpec { sec: 1716742740, nsec: 0 } );
+//! 	// Converting from usize only for debugging purposes, generally not needed
+//! 	let w = PinnedWriter::from_usize(writer);
+//! 	assert_eq!(w.time, TimeSpec { sec: 1716742740, nsec: 0 } );
 //!
-//!		let status = write_signal(writer, stack_as_f32.as_mut_ptr(), stack_as_f32.len());
-//!		assert_ne!(status, 0);
+//! 	let status = write_signal(writer, stack_as_f32.as_mut_ptr(), stack_as_f32.len());
+//! 	assert_ne!(status, 0);
 //!
-//!		destroy_writer(writer);
-//!	}
+//! 	// Make sure to clean up to avoid memory leaks
+//! 	destroy_writer(writer);
+//! }
 //! ```
 //!
 //! For a working javascript example, see `lib/web/html-js/worklet-processor.js`.
@@ -75,7 +78,7 @@ const MAX_ERROR_LEN: usize = 64;
 
 /// WebAssembly wrappers for internal types.
 mod wrapper {
-	use core::alloc::Layout;
+	use core::{alloc::Layout, marker::PhantomPinned, ops::{Deref, DerefMut}, pin::Pin};
 	use crate::alloc::{alloc, dealloc};
 	use signals::{MessageError, MessageGenerator, SampledMessage};
 	use time::TimeSpec;
@@ -90,13 +93,11 @@ mod wrapper {
 	/// ```
 	/// let mut time = TimeSpec { sec: 1716742740, nsec: 0 };
 	/// let generator = junghans::new(None).map_err(message_error_to_string).unwrap();
-	/// let message = generator.get_message(&mut time).map_err(message_error_to_string).unwrap()
-	/// 			  .sample();
+	/// let message = generator.get_message(&mut time).map_err(message_error_to_string).unwrap().sample();
 	/// let writer = junghans::make_writer::<48000>();
-	/// let wrapper = Writer::new(time, message, generator, writer).map(|p| p as usize);
+	/// let wrapper = Writer::new(time, message, generator, writer);
 	/// assert!(wrapper.is_ok());
-	/// let wrapper = wrapper.unwrap() as *mut Writer;
-	/// unsafe { wrapper.drop_in_place(); }
+	/// unsafe { PinnedWriter::drop_in_place(wrapper.unwrap()) };
 	/// ```
 	pub(super) struct Writer {
 		/// The **next** timestamp to transmit.
@@ -114,7 +115,9 @@ mod wrapper {
 		/// The writer to transmit the message.
 		///
 		/// `Writer` takes ownership over the pointed-to value.
-		writer: *mut dyn FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool)
+		writer: *mut dyn FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool),
+		// Make !Unpin since this type cannot be safely moved
+		_pin: PhantomPinned
 	}
 
 	impl Writer {
@@ -142,7 +145,7 @@ mod wrapper {
 		/// Returns a `&'static str` if there is an issue allocating memory.
 		pub(super) fn new<GeneratorFunc, WriterFunc>(time: TimeSpec, message: SampledMessage<48000>,
 													 generator: GeneratorFunc, writer: WriterFunc)
-		-> Result<*mut Self, &'static str>
+		-> Result<Pin<PinnedWriter>, &'static str>
 		where
 			GeneratorFunc: MessageGenerator + 'static,
 			WriterFunc: FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool) + 'static
@@ -186,10 +189,11 @@ mod wrapper {
 					time,
 					message,
 					generator: g,
-					writer: w
+					writer: w,
+					_pin: PhantomPinned,
 				});
 
-				Ok(s)
+				Ok(PinnedWriter::new(s))
 			}
 		}
 
@@ -203,16 +207,17 @@ mod wrapper {
 		/// Returns a [`MessageError`] if an error occurs generating a new message. In this case, the
 		/// buffer may be partially written but it is impossible to determine exactly how many samples
 		/// were written.
-		pub(super) fn write(&mut self, buffer: &mut [f32]) -> Result<usize, MessageError> {
+		pub(super) fn write(self: Pin<&mut Self>, buffer: &mut [f32]) -> Result<usize, MessageError> {
 			// Safety: generator and writer are set in Writer::new and never modified, so they are valid
 			// pointers. Additionally, since we have a mut reference to self, there can be no aliasing so
 			// we can use references.
-			let (generator, writer) = unsafe { (&mut *self.generator, &mut *self.writer) };
+			let this = unsafe { self.get_unchecked_mut() };
+			let (generator, writer) = unsafe { (&mut *this.generator, &mut *this.writer) };
 			let mut len = buffer.len();
 			loop {
-				let (i, next) = writer(&mut self.message, buffer);
+				let (i, next) = writer(&mut this.message, buffer);
 				if next {
-					self.message = generator.get_message(&mut self.time)?.sample();
+					this.message = generator.get_message(&mut this.time)?.sample();
 				}
 
 				if i >= len {
@@ -230,26 +235,66 @@ mod wrapper {
 		///
 		/// This function will panic if the `Writer` was not constructed with [`Writer::new`].
 		fn drop(&mut self) {
-			// Safety: self.generator and self.writer are set in Writer::new and never modified, so they
-			// are valid pointers. Memory dealloced here was allocated by the same allocator with the same
-			// layout.
-			unsafe {
-				self.generator.drop_in_place();
-				self.writer.drop_in_place();
+			pin_drop(unsafe { Pin::new_unchecked(self) });
+			fn pin_drop(this: Pin<&mut Writer>) {
+				// Safety: self.generator and self.writer are set in Writer::new and never modified,
+				// so they are valid pointers. Memory dealloced here was allocated by the same
+				// allocator with the same layout.
+				unsafe {
+					this.generator.drop_in_place();
+					this.writer.drop_in_place();
 
-				// Ensure we dealloc with the same layout we alloced
-				let (layout, _) = Layout::new::<Self>()
-									.extend(Layout::for_value(&*self.generator))
-									.and_then(|(l, _)| {
-										l.extend(Layout::for_value(&*self.writer))
-									}).unwrap_unchecked();
+					// Ensure we dealloc with the same layout we alloced
+					let (layout, _) = Layout::new::<Writer>()
+										.extend(Layout::for_value(&*this.generator))
+										.and_then(|(l, _)| {
+											l.extend(Layout::for_value(&*this.writer))
+										}).unwrap_unchecked();
 
-				dealloc(self as *mut Self as *mut u8, layout);
+					dealloc(this.get_unchecked_mut() as *mut Writer as *mut u8, layout);
+				}
 			}
 		}
 	}
+
+	#[repr(transparent)]
+	pub(super) struct PinnedWriter {
+		ptr: *mut Writer
+	}
+
+	impl PinnedWriter {
+		pub(super) fn new(ptr: *mut Writer) -> Pin<Self> {
+			unsafe { Pin::new_unchecked(Self { ptr }) }
+		}
+
+		pub(super) fn as_usize(pin: Pin<Self>) -> usize {
+			(&raw const *pin).expose_provenance()
+		}
+
+		pub(super) unsafe fn from_usize(ptr: usize) -> Pin<Self> {
+			Self::new(core::ptr::with_exposed_provenance_mut(ptr))
+		}
+
+		pub(super) unsafe fn drop_in_place(pin: Pin<Self>) {
+			unsafe { Pin::into_inner_unchecked(pin).ptr.drop_in_place(); }
+		}
+	}
+
+	impl Deref for PinnedWriter {
+		type Target = Writer;
+
+		fn deref(&self) -> &Self::Target {
+			unsafe { &*self.ptr }
+		}
+	}
+
+	impl DerefMut for PinnedWriter {
+		fn deref_mut(&mut self) -> &mut Self::Target {
+			unsafe { &mut *self.ptr }
+		}
+	}
 }
-use wrapper::Writer;
+use wrapper::PinnedWriter;
 
 /// Convert a [`MessageError`] into a string for human consumption.
 fn message_error_to_string(e: MessageError) -> &'static str {
@@ -275,7 +320,7 @@ macro_rules! make_writer_impl_ {
 		let generator = $mod::new($timezone).map_err(message_error_to_string)?;
 		let message = generator.get_message(&mut $time).map_err(message_error_to_string)?.sample();
 		let writer = $mod::make_writer::<48000>();
-		Writer::new($time, message, generator, writer).map(|p| p as usize)
+		wrapper::Writer::new($time, message, generator, writer).map(|p| PinnedWriter::as_usize(p))
 	})
 }
 
@@ -378,9 +423,8 @@ pub unsafe extern "C" fn make_writer(signal: u8, msec: i64, timezone: *mut u8, t
 /// that has not yet been destroyed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn destroy_writer(writer: usize) {
-	let writer = writer as *mut Writer;
 	unsafe {
-		writer.drop_in_place();
+		PinnedWriter::drop_in_place(PinnedWriter::from_usize(writer));
 	}
 }
 
@@ -397,14 +441,16 @@ pub unsafe extern "C" fn destroy_writer(writer: usize) {
 ///
 /// # Safety
 ///
-/// The caller must ensure that `v` is valid and points to a properly aligned, contiguous block of
-/// at least `max(len * 4, MAX_ERROR_LEN)` bytes.
+/// The caller must ensure that
+/// - `writer` is a valid, non-zero handle returned by [`make_writer`] that has not yet been destroyed.
+/// - `v` is valid and points to a properly aligned, contiguous block of at least
+///   `max(len * 4, MAX_ERROR_LEN)` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn write_signal(writer: usize, v: *mut f32, len: usize) -> usize {
 	unsafe {
-		let writer = &mut *(writer as *mut Writer);
+		let mut writer = PinnedWriter::from_usize(writer);
 		let buf = slice::from_raw_parts_mut(v, len);
-		match writer.write(buf) {
+		match writer.as_mut().write(buf) {
 			Ok(n) => n,
 			Err(e) => {
 				write_to_stack(v as *mut u8, message_error_to_string(e));
@@ -416,8 +462,7 @@ pub unsafe extern "C" fn write_signal(writer: usize, v: *mut f32, len: usize) ->
 
 #[cfg(test)]
 mod tests {
-	use core::mem::transmute;
-	use super::*;
+	use super::{*, wrapper::Writer};
 
 	unsafe fn get_str(stack: &[u8]) -> &[u8] {
 		match stack.iter().position(|v| *v == 0) {
@@ -454,14 +499,15 @@ mod tests {
 
 	#[test]
 	fn make_writer_write_test() {
-		let mut stack: [u8; CUSTOM_STACK_SIZE] = [0; CUSTOM_STACK_SIZE];
+		let mut stack_f32: [f32; CUSTOM_STACK_SIZE / 4] = [0.0; CUSTOM_STACK_SIZE / 4];
 		unsafe {
+			let stack = &mut *((&raw mut stack_f32) as *mut [u8; CUSTOM_STACK_SIZE]);
+
 			let writer = make_writer(SIGNAL_WWVB, 1716742680000, stack.as_mut_ptr(), 0);
 			assert_ne!(writer, 0);
-			let w = writer as *mut Writer;
-			assert_eq!((*w).time, TimeSpec { sec: 1716742740, nsec: 0 } );
+			let w = PinnedWriter::from_usize(writer);
+			assert_eq!(w.time, TimeSpec { sec: 1716742740, nsec: 0 } );
 
-			let mut stack_f32 = transmute::<_, [f32; CUSTOM_STACK_SIZE / 4]>(stack);
 			assert_ne!(write_signal(writer, stack_f32.as_mut_ptr(), stack_f32.len()), 0);
 
 			let power = stack_f32
@@ -482,20 +528,22 @@ mod tests {
 
 	#[test]
 	fn make_writer_write_test_error() {
-		let mut stack: [u8; CUSTOM_STACK_SIZE] = [0; CUSTOM_STACK_SIZE];
+		let mut stack_f32: [f32; CUSTOM_STACK_SIZE / 4] = [0.0; CUSTOM_STACK_SIZE / 4];
 		unsafe {
+			let stack = &mut *((&raw mut stack_f32) as *mut [u8; CUSTOM_STACK_SIZE]);
+
 			let writer = make_writer(SIGNAL_WWVB, 1716742680000, stack.as_mut_ptr(), 0);
 			assert_ne!(writer, 0);
-			let w = writer as *mut Writer;
-			assert_eq!((*w).time, TimeSpec { sec: 1716742740, nsec: 0 } );
-			(*w).time.sec = -1000;
+			let mut w = PinnedWriter::from_usize(writer);
+			assert_eq!(w.time, TimeSpec { sec: 1716742740, nsec: 0 } );
+			w.as_mut().get_unchecked_mut().time.sec = -1000;
 
 			for _ in 1..11250 {
-				assert_ne!(write_signal(writer, stack.as_mut_ptr() as *mut f32, stack.len() / 4), 0);
+				assert_ne!(write_signal(writer, stack_f32.as_mut_ptr(), stack_f32.len()), 0);
 			}
 
-			assert_eq!(write_signal(writer, stack.as_mut_ptr() as *mut f32, stack.len() / 4), 0);
-			assert_eq!(get_str(&stack), b"Unsupported time");
+			assert_eq!(write_signal(writer, stack_f32.as_mut_ptr(), stack_f32.len()), 0);
+			assert_eq!(get_str(stack), b"Unsupported time");
 
 			destroy_writer(writer);
 		}
@@ -503,15 +551,15 @@ mod tests {
 
 	#[test]
 	fn module_doc_test() {
-		let mut stack_as_u8: [u8; CUSTOM_STACK_SIZE] = [0; CUSTOM_STACK_SIZE];
+		let mut stack_as_f32: [f32; CUSTOM_STACK_SIZE / 4] = [0.0; CUSTOM_STACK_SIZE / 4];
 		unsafe {
-			let mut stack_as_f32 = transmute::<_, [f32; CUSTOM_STACK_SIZE / 4]>(stack_as_u8);
+			let stack_as_u8 = &mut *((&raw mut stack_as_f32) as *mut [u8; CUSTOM_STACK_SIZE]);
 
 			let writer = make_writer(SIGNAL_WWVB, 1716742680000, stack_as_u8.as_mut_ptr(), 0);
 			assert_ne!(writer, 0);
 
-			let w = writer as *mut Writer;
-			assert_eq!((*w).time, TimeSpec { sec: 1716742740, nsec: 0 } );
+			let w = PinnedWriter::from_usize(writer);
+			assert_eq!(w.time, TimeSpec { sec: 1716742740, nsec: 0 } );
 
 			let status = write_signal(writer, stack_as_f32.as_mut_ptr(), stack_as_f32.len());
 			assert_ne!(status, 0);
@@ -524,9 +572,8 @@ mod tests {
 		let generator = junghans::new(None).map_err(message_error_to_string).unwrap();
 		let message = generator.get_message(&mut time).map_err(message_error_to_string).unwrap().sample();
 		let writer = junghans::make_writer::<48000>();
-		let wrapper = Writer::new(time, message, generator, writer).map(|p| p as usize);
+		let wrapper = Writer::new(time, message, generator, writer);
 		assert!(wrapper.is_ok());
-		let wrapper = wrapper.unwrap() as *mut Writer;
-		unsafe { wrapper.drop_in_place(); }
+		unsafe { PinnedWriter::drop_in_place(wrapper.unwrap()) };
 	}
 }

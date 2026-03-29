@@ -57,7 +57,7 @@ use crate::common::DUT1_TIMES;
 /// This constant is split into two tables ([`DUT1_TIMES`] and [`DUT1_VALS`]) to optimize for space.
 /// The two tables must be kept in sync, where `DUT1_TIMES` represents the time of a change in the
 /// UT1-UTC offset, and `DUT1_VALS` represents the encoded UT1-UTC offset at that time.
-const DUT1_VALS: [u16; 113] = [
+const DUT1_VALS: [u16; 114] = [
 	0xC000, 0x8000, 0x0000, 0x0080,
 	0x00F8, 0xE000, 0xC000, 0x8000,
 	0x0000, 0x00E0, 0xFC00, 0xF000,
@@ -86,7 +86,7 @@ const DUT1_VALS: [u16; 113] = [
 	0xF800, 0xF000, 0xE000, 0xC000,
 	0x8000, 0x0000, 0x0080, 0x00C0,
 	0x0080, 0x0000, 0x8000, 0x0000,
-	0x8000
+	0x8000, 0x0000
 ];
 
 /// An unpacked / uncompressed MSF message.

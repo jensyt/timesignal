@@ -1,3 +1,7 @@
+# Version 0.3.1 (2026-04-14)
+
+Added latest DUT1 values.
+
 # Version 0.3.0 (2025-05-26)
 
 Added support for [MSF].

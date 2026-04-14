@@ -18,8 +18,9 @@ doc:
 	cargo +nightly rustdoc --all-features -p sntp  -- --cfg docsrs --document-private-items -A rustdoc::private-intra-doc-links
 	cargo +nightly rustdoc --all-features -p signals  -- --cfg docsrs --document-private-items -A rustdoc::private-intra-doc-links
 
+target := `rustc -vV | grep host | cut -d ' ' -f 2`
 build:
-	RUSTFLAGS="-Zlocation-detail=none -Zfmt-debug=none" cargo +nightly build --release -Z build-std=std,panic_abort
+	RUSTFLAGS="-Zlocation-detail=none -Zfmt-debug=none -Zunstable-options -Cpanic=immediate-abort" cargo +nightly build --release -Z build-std=core,std --target={{target}}
 
 wasm:
 	cargo build -r -p web --target wasm32-unknown-unknown

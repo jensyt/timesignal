@@ -206,7 +206,11 @@
 				audiocontext.audioWorklet.addModule("worklet-processor.js"),
 				wasm
 			]);
-			const audionode = new AudioWorkletNode(audiocontext, "worklet-processor");
+			const audionode = new AudioWorkletNode(audiocontext, "worklet-processor", {
+				processorOptions: {
+					module
+				}
+			});
 
 			// Handle errors from the worklet
 			audionode.port.onmessage = (event) => {
@@ -216,8 +220,6 @@
 				}
 			};
 
-			// Initialize the module
-			audionode.port.postMessage({type: "init", module});
 			// Start playing audio
 			const signal = document.getElementById('signal').value;
 			audionode.port.postMessage({type: "play", signal, timezone: getTimezone(signal)});

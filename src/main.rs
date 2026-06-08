@@ -256,14 +256,14 @@ where F: FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool) + Send
 						} else {
 							state = WriterState::Finishing;
 						}
-						data.iter_mut().skip(i).for_each(|v| *v = f32::EQUILIBRIUM);
+						data[i..].fill(f32::EQUILIBRIUM);
 						break;
 					}
 				}
 			}
 		} else {
 			// Write silence if a message isn't available
-			data.iter_mut().for_each(|v| *v = f32::EQUILIBRIUM);
+			data.fill(f32::EQUILIBRIUM);
 		}
 	}
 }
@@ -271,7 +271,7 @@ where F: FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool) + Send
 /// Error handler for audio streaming.
 ///
 /// Panics and prints the error.
-fn audio_error(error: cpal::StreamError) {
+fn audio_error(error: cpal::Error) {
 	panic!("Error occured on the stream: {}", error);
 }
 
@@ -302,7 +302,7 @@ fn audio_error(error: cpal::StreamError) {
 /// # Errors
 ///
 /// This macro can generate a variety of errors, all of which can be converted to `Box<dyn Error>`:
-/// - [`cpal::BuildStreamError`], [`cpal::PlayStreamError`] from configuring and playing audio.
+/// - [`cpal::Error`] from configuring and playing audio.
 /// - `&str` for several untyped errors (no output audio device, failed to get system time,
 ///    unsupported signal type).
 /// - [`std::io::Error`] for NTP errors.
@@ -327,7 +327,7 @@ macro_rules! play {
 		let device = host.default_output_device().ok_or("Failed to get default audio output device")?;
 		let config = cpal::StreamConfig {
 			channels: 1,
-			sample_rate: cpal::SampleRate(48000),
+			sample_rate: 48000,
 			buffer_size: cpal::BufferSize::Fixed(1024),
 		};
 		// Set up thread synchronization
@@ -338,7 +338,7 @@ macro_rules! play {
 			$($signal => {
 				// Create output stream & message writers
 				let stream = device.build_output_stream(
-								&config,
+								config,
 								make_writer(rx, flagger.clone(), $args.count, $mod::make_writer::<48000>()),
 								audio_error,
 								None)?;
@@ -377,7 +377,7 @@ macro_rules! play {
 /// # Errors
 ///
 /// This function can generate a variety of errors, all wrapped in `Box<dyn Error>`:
-/// - [`cpal::BuildStreamError`], [`cpal::PlayStreamError`] from configuring and playing audio.
+/// - [`cpal::Error`] from configuring and playing audio.
 /// - `&str` for several untyped errors (no output audio device, failed to get system time,
 ///    unsupported signal type).
 /// - [`std::io::Error`] for NTP errors.

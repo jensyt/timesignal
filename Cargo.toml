@@ -9,7 +9,7 @@ members = ["./", "crates/*", "lib/*"]
 default-members = ["./", "crates/*"]
 
 [dependencies]
-cpal = "0.15.3"
+cpal = "0.18"
 time = { path = "crates/time", features = ["std", "now"] }
 sntp = { path = "crates/sntp" }
 signals = { path = "crates/signals", features = ["std"] }

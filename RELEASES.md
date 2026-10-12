@@ -1,3 +1,7 @@
+# Version 0.3.2 (2026-10-12)
+
+Added latest DUT1 values.
+
 # Version 0.3.1 (2026-04-14)
 
 Added latest DUT1 values.

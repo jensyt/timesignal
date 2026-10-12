@@ -161,7 +161,7 @@ enum WriterState {
 /// The [`Message::delay`] field in the returned message is converted from real time in nanoseconds
 /// to sample space at 48 kHz, meaning 1 unit of delay is 20.833 microseconds.
 #[inline(always)]
-fn get_message(rx: &Receiver<Message>) -> Option<SampledMessage<48000>> {
+fn get_message<const N: u64>(rx: &Receiver<Message>) -> Option<SampledMessage<N>> {
 	if let Ok(m) = rx.try_recv() {
 		// Convert delay to samples
 		Some(m.sample())
@@ -211,9 +211,9 @@ fn get_message(rx: &Receiver<Message>) -> Option<SampledMessage<48000>> {
 ///
 /// flagger.wait();
 /// ```
-fn make_writer<F>(rx: Receiver<Message>, flagger: Arc<Flagger>, count: NonZero<usize>, mut func: F)
+fn make_writer<F, const N: u64>(rx: Receiver<Message>, flagger: Arc<Flagger>, count: NonZero<usize>, mut func: F)
 -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo)
-where F: FnMut(&mut SampledMessage<48000>, &mut [f32]) -> (usize, bool) + Send
+where F: FnMut(&mut SampledMessage<N>, &mut [f32]) -> (usize, bool) + Send
 {
 	let mut state = WriterState::Waiting;
 	let mut message = Default::default();
